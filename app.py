@@ -7,18 +7,17 @@ import datetime
 # --- CONFIGURATION & PAGE SETUP ---
 st.set_page_config(page_title="Dublin Property Forensics & Valuation App", layout="wide", page_icon="🏠")
 
-# Initialize Gemini Client if API key is present
-# Streamlit secrets will hold our free Gemini API Key securely
+# Initialize Gemini Client
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 if api_key:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 else:
-    st.warning("⚠️ Gemini API Key not configured. AI vision features will run in mock mode.")
+    st.warning("⚠️ Gemini API Key not configured. AI features will run in demo/mock mode.")
 
 # --- TITLE & INTRO ---
 st.title("🏠 Dublin Property Forensics & Valuation App")
-st.markdown("Automate physical audits, analyze retrofitting costs, and project 3-5 year valuation metrics.")
+st.markdown("Automate physical audits, analyze retrofitting costs, parse BER PDFs, and project 3-5 year valuation metrics.")
 st.markdown("---")
 
 # --- LAYOUT: INPUTS (LEFT) vs ANALYSIS (RIGHT) ---
@@ -26,10 +25,66 @@ col_input, col_analysis = st.columns(2)
 
 with col_input:
     st.header("📇 Property Identifiers")
+    
+    # Daft.ie URL Ingestion
+    daft_url = st.text_input(
+        "Daft.ie Listing URL", 
+        placeholder="https://www.daft.ie/for-sale/...",
+        help="Paste the Daft.ie link to track this property"
+    )
+    
     eircode = st.text_input("Eircode", value="D14 F8H3", max_chars=8, help="Ensures exact geospatial matching")
     asking_price = st.number_input("Asking Price (€)", min_value=10000, value=650000, step=10000)
     floor_area = st.number_input("True Floor Area (m²)", min_value=20, value=85, step=5)
-    current_ber = st.selectbox("Current BER Rating", ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], index=9)
+    
+    # BER PDF Uploader
+    st.markdown("---")
+    st.header("📄 BER PDF Certificate Parsing")
+    ber_pdf = st.file_uploader("Upload Official SEAI BER Report (PDF)", type=["pdf"])
+    
+    extracted_ber = "D1"  # Default fallback
+    
+    if ber_pdf is not None:
+        if api_key:
+            with st.spinner("Gemini is reading and extracting data from your BER PDF..."):
+                try:
+                    # Read PDF bytes directly for Gemini 1.5 Flash
+                    pdf_bytes = ber_pdf.read()
+                    pdf_part = {
+                        "mime_type": "application/pdf",
+                        "data": pdf_bytes
+                    }
+                    
+                    prompt = """
+                    You are an expert Irish building surveyor. Parse this official SEAI BER Certificate PDF.
+                    Extract and return ONLY a valid JSON block with these keys:
+                    {
+                      "ber_rating": "The letter grade e.g. A1, B2, C3, D1, G",
+                      "energy_indicator": "The numeric value in kWh/m²/yr",
+                      "dwelling_type": "e.g. Mid-terrace, Semi-detached, Detached"
+                    }
+                    Do not write any markdown wrappers other than raw JSON.
+                    """
+                    
+                    response = model.generate_content([prompt, pdf_part])
+                    # Clean response to get raw JSON
+                    cleaned_response = response.text.replace("```json", "").replace("```", "").strip()
+                    import json
+                    ber_data = json.loads(cleaned_response)
+                    
+                    extracted_ber = ber_data.get("ber_rating", "D1")
+                    st.success(f"🎉 Successfully parsed BER: **{extracted_ber}** ({ber_data.get('energy_indicator')} kWh/m²/yr)")
+                except Exception as e:
+                    st.error(f"Could not parse PDF automatically: {e}. Defaulting to manual selection.")
+        else:
+            st.info("💡 PDF uploaded! (Connect your Gemini API Key in secrets to enable automatic parsing).")
+
+    # Manual override/selection if PDF parsing wasn't run or failed
+    current_ber = st.selectbox(
+        "Current BER Rating (Auto-filled from PDF if uploaded)", 
+        ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], 
+        index=["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"].index(extracted_ber)
+    )
     
     st.markdown("---")
     st.header("🛠️ Planned Renovations")
@@ -41,13 +96,14 @@ with col_input:
     
     st.markdown("---")
     st.header("📸 Media Ingestion (AI Vision)")
-    uploaded_photo = st.file_uploader("Upload utility board, attic, damp patches, or general photo", type=["jpg", "jpeg", "png"])
+    uploaded_photo = st.file_uploader("Upload utility board, attic, damp patches, or general photos", type=["jpg", "jpeg", "png"])
+
 
 # --- COMPUTATION ENGINE ---
+
 # 1. True Sold €/m² Matrix Database (Using Representative Dublin PPR + CSO Multipliers)
 @st.cache_data
 def get_comparative_matrix(asking, area):
-    # Historical base records. In a production app, fetch from local CSV or SQLite
     data = [
         {"Address": "Target House", "Sale Date": "Live", "PPR Price": asking, "CSO Index Multiplier": 1.00, "Typology": "End-Terrace", "BER": "D1", "Area (m²)": area},
         {"Address": "14 Roebuck Downs", "Sale Date": "2024-03", "PPR Price": 520000, "CSO Index Multiplier": 1.10, "Typology": "Mid-Terrace", "BER": "C2", "Area (m²)": 82},
@@ -55,15 +111,12 @@ def get_comparative_matrix(asking, area):
         {"Address": "5 Clonskeagh Road", "Sale Date": "2025-01", "PPR Price": 680000, "CSO Index Multiplier": 1.06, "Typology": "Semi-Detached", "BER": "B3", "Area (m²)": 95}
     ]
     df = pd.DataFrame(data)
-    # Inflate historical prices to today's money
     df["In Today's Money (€)"] = (df["PPR Price"] * df["CSO Index Multiplier"]).astype(int)
-    # Calculate True €/m²
     df["True €/m²"] = (df["In Today's Money (€)"] / df["Area (m²)"]).round(2)
     return df
 
 # 2. SEAI Retrofit Costs & Grants Engine
 def compute_retrofit_metrics(current_ber, selected_works):
-    # Baseline costs based on Dublin 2026 contractor survey rates
     base_retrofit_cost_by_rating = {
         'G': 85000, 'F': 75000, 'E1': 65000, 'E2': 65000,
         'D1': 55000, 'D2': 55000, 'C1': 25000, 'C2': 20000,
@@ -96,7 +149,7 @@ def compute_retrofit_metrics(current_ber, selected_works):
     net_total = max(0, gross_total - seai_grants)
     
     # Determine Habitability Status
-    habitability = "Habitable (Move in immediately)"
+    habitability = "🟢 Habitable (Move in immediately)"
     delay = "0 Weeks"
     if "Full Rewire" in selected_works or "Internal Dry-lining (IWI)" in selected_works:
         habitability = "🔴 Unhabitable (Significant internal structural disruption)"
@@ -106,10 +159,7 @@ def compute_retrofit_metrics(current_ber, selected_works):
 
 # 3. Future Resale and Rental Projection (3-5 Years)
 def run_predictive_analytics(asking, net_retrofit_cost, current_ber):
-    # Average compound annual growth rate for South Dublin (baseline 4.0%)
-    cagr = 0.040
-    
-    # Energy Efficiency Uplift: Upgrading G/F/E/D ratings to B3+ yields a ~11% premium
+    cagr = 0.040  # South Dublin benchmark
     upgrade_premium = 1.11 if current_ber in ['D1', 'D2', 'E1', 'E2', 'F', 'G'] else 1.00
     
     future_cost_basis = asking + net_retrofit_cost
@@ -117,11 +167,10 @@ def run_predictive_analytics(asking, net_retrofit_cost, current_ber):
     resell_5yr = future_cost_basis * ((1 + cagr) ** 5) * upgrade_premium
     
     # Rental limits (Rent Pressure Zone checks)
-    is_rpz = True  # Dublin is entirely a Rent Pressure Zone
-    current_avg_rent_m2 = 25.00 # Dundrum/Stillorgan electoral area average
+    current_avg_rent_m2 = 25.00  # Dundrum/Stillorgan electoral area average
     base_rent = floor_area * current_avg_rent_m2
     
-    if is_rpz and (net_retrofit_cost < 30000):
+    if net_retrofit_cost < 30000:
         # RPZ legal cap of 2% maximum per year
         rent_3yr = base_rent * ((1 + 0.02) ** 3)
         rent_5yr = base_rent * ((1 + 0.02) ** 5)
@@ -146,6 +195,10 @@ with col_analysis:
     with tab_overview:
         st.subheader("🏡 Financial Blueprint & Projections")
         
+        # Display Daft URL if submitted
+        if daft_url:
+            st.caption(f"🔗 Tracking Listing: [{daft_url}]({daft_url})")
+            
         # Row 1 Key Metrics
         m1, m2, m3 = st.columns(3)
         m1.metric("Est. Net Retrofit Cost", f"€{net_cost:,}")
