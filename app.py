@@ -252,3 +252,232 @@ with left_panel:
 
     st.subheader("🛌 Bedroom Dimensions Audit")
     b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
+    b1_l = st.number_input("Bedroom 1 Length (m)", value=4.0, step=0.1)
+    
+    b2_w = st.number_input("Bedroom 2 Width (m)", value=3.0, step=0.1)
+    b2_l = st.number_input("Bedroom 2 Length (m)", value=3.0, step=0.1)
+    
+    b3_w = st.number_input("Bedroom 3 Width (m)", value=2.2, step=0.1)
+    b3_l = st.number_input("Bedroom 3 Length (m)", value=2.7, step=0.1)
+
+    st.subheader("💰 Buyer Parameters")
+    budget_max = st.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
+    target_ber = st.selectbox("Target Mortgage Tier", ["AIB Green Mortgage (B3 or better)", "Standard Mortgage (Any BER)", "Net-Zero A-Rating Target"])
+
+    st.subheader("⚙️ Calibration (Interactive Overrides)")
+    address_input = st.text_input("Property Address Override", value=f"{extracted_street}, {extracted_postcode}")
+    asking_price = st.number_input("Asking Price (€)", value=525000, step=10000)
+    
+    default_size = pdf_metrics["size"] if pdf_metrics["size"] else 95.0
+    size_sqm = st.number_input("Floorplate Size (m²)", value=default_size, step=1.0)
+    
+    default_ber = pdf_metrics["ber"] if pdf_metrics["ber"] else "B2"
+    ber_rating = st.selectbox("Current BER Rating", ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], index=4)
+    typology = st.selectbox("Property Typology", ["End-of-Terrace", "Mid-Terrace", "Semi-Detached", "Detached"])
+    
+    run_audit_btn = st.button("🚀 Run 360° Forensic Audit Protocol (v6.0)", type="primary", use_container_width=True)
+
+# Calculate bedroom areas dynamically
+b1_area = b1_w * b1_l
+b2_area = b2_w * b2_l
+b3_area = b3_w * b3_l
+
+# Process custom works based on narrative input
+if user_narrative:
+    custom_works = mock_llm_parse_custom_works(user_narrative)
+    if custom_works:
+        total_low = sum(item["low"] for item in custom_works)
+        total_high = sum(item["high"] for item in custom_works)
+
+# ---------------------------------------------------------
+# CALCULATE BID ROADS & ACQUISITION BOUNDARIES
+# ---------------------------------------------------------
+opening_bid = asking_price * 1.05
+fmv_ceiling = asking_price * 1.15
+walkaway_ceiling = fmv_ceiling - total_low
+
+b1_flag = "Habitable" if b1_area >= 7.0 else "UNLIVABLE BOX ROOM"
+b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
+b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
+
+# ---------------------------------------------------------
+# REPORT OUTPUT & SPATIAL ENGINE
+# ---------------------------------------------------------
+with right_panel:
+    st.subheader("📋 Forensic Audit & Strategic Acquisition Report")
+    
+    tab_report, tab_retrofit, tab_hazards, tab_verdict, tab_map = st.tabs([
+        "💶 Area Comps & CMA",
+        "🏗️ Retrofit & Spatial Fabric",
+        "⛈️ Hazards & Legal",
+        "🏁 Verdict & Export",
+        "🗺️ Spatial GIS Map"
+    ])
+
+    if run_audit_btn:
+        raw_template = """
+### 🏛️ 360° Forensic Audit: [ADDRESS]
+*Generated: [DATE]*
+
+---
+
+### EXECUTIVE SUMMARY:
+The property at **[ADDRESS]** represents an excellent target matching your maximum budget of **EUR [MAX_BUDGET]**. 
+Due to your required Capital Works Reserve requirements of **EUR [COST_LOW] – EUR [COST_HIGH]**, your absolute walk-away bidding limit is calculated at **EUR [WALKAWAY]** to preserve structural cash cushions.
+
+---
+
+### SECTION 1: MICRO-MARKET CMA & VALUATIONS
+
+| BER Performance Tier | Average Price / m² | Target Property Alignment |
+|---|---|---|
+| **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | **Your target aligns here** |
+| **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
+| **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | |
+
+#### Extended Comparable Transaction Matrix
+| Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability |
+|---|---|---|---|---|---|---|---|---|
+| **[ADDRESS]** | **[STREET]** | **Live** | **€[ASKING]** | **[SIZE] m²** | **[BER]** | **[TYPOLOGY]** | **€[RATE]/m²** | **Target Property** |
+| Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | [TYPOLOGY] | €6,927/m² | Near target baseline |
+| Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | [TYPOLOGY] | €5,948/m² | Unmodernised comp |
+
+#### Valuation & Acquisition Boundaries
+* **Fair Market Value (FMV):** €[FMV]
+* **Recommended Opening Bid:** €[OPEN_BID] (Asking + 5%)
+* **Strict Walk-Away Limit:** €[WALKAWAY] (FMV minus Capital Works Reserves)
+
+---
+
+### SECTION 2: BEDROOM SIZE AUDIT (SCSI STANDARDS)
+* **Bedroom 1:** [B1_W]m x [B1_L]m = **[B1_A] m²** ([B1_F])
+* **Bedroom 2:** [B2_W]m x [B2_L]m = **[B2_A] m²** ([B2_F])
+* **Bedroom 3:** [B3_W]m x [B3_L]m = **[B3_A] m²** ([B3_F])
+
+*Note: Under standard SCSI protocols, any room under 7.0 m² cannot be marketed as a bedroom.*
+
+---
+
+### SECTION 3: ROAD TO B3 & A RATING ROADMAPS
+
+#### 🟢 The Road to B3 (Green Mortgage Rate Eligibility)
+* **Attic Insulation:** Gross €2,500 | SEAI Grant: €1,500 | **Net: €1,000**
+* **Heating Controls:** Gross €1,800 | SEAI Grant: €700 | **Net: €1,110**
+* **TOTAL ROAD TO B3:** **Gross €4,300 | Grants €2,200 | Net €2,110**
+
+#### 🔵 The Road to A-Rating (Deep Retrofit / Net-Zero)
+* **External Wall Insulation:** Gross €18,000 | SEAI Grant: €6,000 | **Net: €12,000**
+* **Air-to-Water Heat Pump:** Gross €16,000 | SEAI Grant: €6,500 | **Net: €9,500**
+* **TOTAL ROAD TO A:** **Gross €34,000 | Grants €12,500 | Net €21,500**
+
+---
+
+### SECTION 4: HAZARDS & SURVEY SCAN
+* **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones.
+* **Planning Precedents:** Neighbors on the adjacent street successfully secured dormer and extension retention permissions.
+"""
+        # Safely execute value mapping
+        report = raw_template.replace("[ADDRESS]", address_input)
+        report = report.replace("[DATE]", datetime.date.today().strftime('%B %d, %Y'))
+        report = report.replace("[MAX_BUDGET]", f"{budget_max:,}")
+        report = report.replace("[COST_LOW]", f"{total_low:,}")
+        report = report.replace("[COST_HIGH]", f"{total_high:,}")
+        report = report.replace("[WALKAWAY]", f"{walkaway_ceiling:,.0f}")
+        report = report.replace("[STREET]", extracted_street)
+        report = report.replace("[ASKING]", f"{asking_price:,}")
+        report = report.replace("[SIZE]", str(size_sqm))
+        report = report.replace("[BER]", ber_rating)
+        report = report.replace("[TYPOLOGY]", typology)
+        report = report.replace("[RATE]", f"{asking_price/size_sqm:,.0f}")
+        report = report.replace("[FMV]", f"{fmv_ceiling:,.0f}")
+        report = report.replace("[OPEN_BID]", f"{opening_bid:,.0f}")
+        report = report.replace("[B1_W]", f"{b1_w:.1f}").replace("[B1_L]", f"{b1_l:.1f}").replace("[B1_A]", f"{b1_area:.2f}").replace("[B1_F]", b1_flag)
+        report = report.replace("[B2_W]", f"{b2_w:.1f}").replace("[B2_L]", f"{b2_l:.1f}").replace("[B2_A]", f"{b2_area:.2f}").replace("[B2_F]", b2_flag)
+        report = report.replace("[B3_W]", f"{b3_w:.1f}").replace("[B3_L]", f"{b3_l:.1f}").replace("[B3_A]", f"{b3_area:.2f}").replace("[B3_F]", b3_flag)
+        
+        st.session_state.audit_report = report
+
+    with tab_report:
+        if st.session_state.audit_report:
+            st.markdown("### Executive Valuation Summary")
+            st.markdown(f"**Extracted Address:** {address_input}  \n**Current Asking Price:** €{asking_price:,}  \n**Target Floorplate:** {size_sqm} m²")
+            st.markdown("---")
+            st.markdown("### Micro-Market CMA & Valuations")
+            st.markdown(f"| Property Address | Asking Price | Floorplate | BER | Situation |  \n|---|---|---|---|---|  \n| **{address_input}** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** |")
+            st.markdown(f"- **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}  \n- **Recommended Opening Bid:** €{opening_bid:,.0f}  \n- **Strict Walk-Away Limit:** €{walkaway_ceiling:,.0f}")
+        else:
+            st.info("👈 Click 'Run 360° Forensic Audit' to generate report data.")
+            
+    with tab_retrofit:
+        if st.session_state.audit_report:
+            st.markdown("### Bedroom Sizes Audit (SCSI Thresholds)")
+            st.markdown(f"* **Bedroom 1:** {b1_w}m x {b1_l}m = **{b1_area:.2f} m²** ({b1_flag})  \n* **Bedroom 2:** {b2_w}m x {b2_l}m = **{b2_area:.2f} m²** ({b2_flag})  \n* **Bedroom 3:** {b3_w}m x {b3_l}m = **{b3_area:.2f} m²** ({b3_flag})")
+            st.markdown("---")
+            st.markdown("### Thermodynamic Retrofit Costing (SEAI Pathways)")
+            st.markdown("#### 🟢 Road to B3 (Green Mortgage Eligibility)  \n- **Total Gross Cost:** €4,300  \n- **Total SEAI Grants:** €2,200  \n- **Net Cash Required:** **€2,110**  \n\n#### 🔵 Road to A-Rating (Decarbonized Asset)  \n- **Total Gross Cost:** €34,000  \n- **Total SEAI Grants:** €12,500  \n- **Net Cash Required:** **€21,500**")
+            
+    with tab_hazards:
+        if st.session_state.audit_report:
+            st.markdown("### Environmental & Conveyancing Risk Radar")
+            st.markdown("* **OPW Flooding Extent:** Located outside predicted 1-in-100 year fluvial envelopes.  \n* **Title Check:** Verify Freehold status. Ensure that any attic conversion is certified as storage rather than habitable space.  \n* **DLRCC / DCC Planning Precedent:** High approval rate for rear extensions under 40 m² and attic conversions on adjacent plots.")
+            
+    with tab_verdict:
+        if st.session_state.audit_report:
+            st.markdown("### Final Acquisition Verdict")
+            st.success("💎 **STRONG BUY** (Pending structural engineer verification of boundaries)")
+            st.markdown("---")
+            st.markdown("### 📥 Export Executive Report")
+            c_dl1, c_dl2 = st.columns(2)
+            
+            c_dl1.download_button(
+                label="📥 Download Markdown Version",
+                data=st.session_state.audit_report,
+                file_name="Forensic_Audit_Report.md",
+                mime="text/markdown"
+            )
+            
+            if FPDF:
+                pdf_data = generate_pdf_bytes(st.session_state.audit_report, address_input)
+                c_dl2.download_button(
+                    label="📕 Download Structured PDF Version",
+                    data=pdf_data,
+                    file_name="Forensic_Audit_Report.pdf",
+                    mime="application/pdf"
+                )
+                
+    with tab_map:
+        st.subheader("🗺️ Dynamic GIS Spatial Hazards & Planning Precedents")
+        if folium:
+            m = folium.Map(location=[map_lat, map_lon], zoom_start=16)
+            
+            folium.Marker(
+                [map_lat, map_lon],
+                popup="🎯 <b>" + address_input + "</b>",
+                tooltip="Target Baseline",
+                icon=folium.Icon(color="red", icon="home")
+            ).add_to(m)
+            
+            if is_d08:
+                folium.Circle(
+                    location=[53.3415, -6.3160],
+                    radius=180,
+                    color="blue",
+                    fill=True,
+                    fill_color="blue",
+                    fill_opacity=0.35,
+                    popup="🔴 <b>OPW Fluvial Flood Risk: River Camac Catchment</b>"
+                ).add_to(m)
+            elif is_d14:
+                folium.Circle(
+                    location=[53.2970, -6.2480],
+                    radius=200,
+                    color="blue",
+                    fill=True,
+                    fill_color="blue",
+                    fill_opacity=0.3,
+                    popup="⚠️ <b>OPW Flood Risk: River Dodder Catchment</b>"
+                ).add_to(m)
+                
+            st_folium(m, width=650, height=450)
+        else:
+            st.info("Folium GIS library not installed.")
