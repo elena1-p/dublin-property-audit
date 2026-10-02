@@ -29,15 +29,13 @@ def generate_ai_content(prompt, contents=None):
     if not api_key:
         raise Exception("GEMINI_API_KEY is missing from your Streamlit Secrets. Please add it to your Streamlit App settings.")
         
-    # Step 1: Programmatically query available models for this specific API key & SDK environment
     discovered_models = []
     try:
         for m in genai.list_models():
             if "generateContent" in m.supported_methods:
                 clean_name = m.name.replace("models/", "")
                 discovered_models.append(clean_name)
-    except Exception as e:
-        # Graceful fallback if programmatic listing is restricted
+    except Exception:
         discovered_models = [
             "gemini-1.5-flash", 
             "gemini-1.5-flash-latest", 
@@ -46,7 +44,6 @@ def generate_ai_content(prompt, contents=None):
             "gemini-pro"
         ]
         
-    # Step 2: Prioritize 1.5-flash and 1.5-pro, then other discovered models
     preferred = [m for m in discovered_models if "1.5-flash" in m or m == "gemini-1.5-flash"]
     preferred += [m for m in discovered_models if "1.5-pro" in m or m == "gemini-1.5-pro"]
     preferred += [m for m in discovered_models if m not in preferred]
@@ -69,12 +66,10 @@ def generate_ai_content(prompt, contents=None):
         except Exception as e:
             err_msg = str(e)
             errors.append(f"🔴 **{model_name} failed:** {err_msg}")
-            # Fail early for invalid API Key or Quota restrictions
-            if "API_KEY_INVALID" in err_msg or "API key not valid" in err_msg or "403" in err_msg or "quota" in err_msg.lower():
+            if "API_KEY_INVALID" in err_msg or "API key not valid" in err_msg or "403" in err_msg:
                 raise Exception(f"API Key / Authentication Issue: {err_msg}")
             continue
             
-    # Raise a clear, comprehensive message displaying exactly why all models failed
     raise Exception("All models failed to respond. Details:\n\n" + "\n\n".join(errors))
 
 # PDF Text-cleaning helper to prevent Latin-1 encoding crashes in FPDF
@@ -134,7 +129,7 @@ with col_inputs:
     st.header("📥 Minimalist Acquisition Inputs")
     st.caption("Paste the property URL and optionally attach files; AI will extract, calculate, and populate all output specs.")
     
-    daft_url = st.text_input("Daft.ie / MyHome.ie Listing URL", value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-solid-dublin-8/6655188")
+    daft_url = st.text_input("Daft.ie / MyHome.ie Listing URL", value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-dublin-8/6655188")
     
     st.markdown("---")
     st.header("📄 Official Documents Upload")
@@ -166,35 +161,7 @@ with col_output:
     
     with tab_report:
         if run_audit_btn:
-            if not api_key:
+            if not has_model and not api_key:
                 st.error("⚠️ GEMINI_API_KEY is not configured in Streamlit Secrets.")
             else:
-                with st.spinner("AI parsing listing, analyzing files, and generating comprehensive report..."):
-                    try:
-                        content_payload = []
-                        if ber_pdf is not None:
-                            ber_pdf.seek(0)
-                            content_payload.append({"mime_type": "application/pdf", "data": ber_pdf.read()})
-                        if uploaded_structural_photo is not None:
-                            uploaded_structural_photo.seek(0)
-                            content_payload.append(Image.open(uploaded_structural_photo))
-                            
-                        master_prompt = f"""
-                        You are the Lead Forensic Building Surveyor, Real Estate Acquisition Strategist, and Structural/Legal Risk Auditor for residential purchases in Dublin, Ireland.
-                        
-                        Given only the property URL: {daft_url}, perform web grounding to parse, extract, and analyze the property. 
-                        
-                        ### CLIENT SPECIFIC ACQUISITION PARAMETERS:
-                        - **Max Buyer Budget:** EUR {budget_max:,}
-                        - **Mortgage Target:** {target_ber}
-                        - **Custom Renovation Requested:** "{custom_work_description if custom_work_description else "None"}"
-                        
-                        Generate the complete, unedited, ultra-detailed **360° FORENSIC PROPERTY & COMPREHENSIVE RISK AUDIT (v6.0)** report. Include the following sections and structural tables:
-                        
-                        ### 🏡 DYNAMIC PROPERTY CARD (Extract and Display First):
-                        - **Property Address** (Extracted from Daft URL)
-                        - **Eircode** (Identify precisely based on location / search)
-                        - **Asking Price** (Extracted from Daft URL)
-                        - **Certified Habitable Size (sqm)** (Extracted from Daft URL or BER)
-                        - **Current BER Rating** (Extracted from Daft URL or parsed BER PDF if attached)
-                        - **Year of Construction** (Extract or estim
+       
