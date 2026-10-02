@@ -17,6 +17,7 @@ except ImportError:
     folium = None
 
 try:
+    import fpdf
     from fpdf import FPDF
 except ImportError:
     FPDF = None
@@ -32,9 +33,7 @@ st.set_page_config(
 if "audit_report" not in st.session_state:
     st.session_state.audit_report = ""
 
-# ---------------------------------------------------------
-# CONSTANTS & COST DATABASE (Materials & Labour Q3 2026)
-# ---------------------------------------------------------
+# Raw Cost Database for Dublin (Materials & Labour Q3 2026)
 DUBLIN_COST_DATABASE = {
     "rsj": {"low": 8000, "high": 12000, "label": "Knock down load-bearing wall & Install steel RSJ"},
     "heat_pump": {"low": 16000, "high": 20000, "label": "Air-to-Water Heat Pump & Radiator retrofitting"},
@@ -64,6 +63,7 @@ def extract_metrics_from_ber_text(text):
     metrics = {"size": None, "ber": None}
     if not text:
         return metrics
+    # Fixed raw escapes to prevent compilation failure
     size_match = re.search(r"(?:dimension|area|floor\s+area|size)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:sqm|m²|sq\s*m)", text, re.IGNORECASE)
     if size_match:
         metrics["size"] = float(size_match.group(1))
@@ -165,44 +165,4 @@ def mock_llm_parse_custom_works(narrative):
             "item": DUBLIN_COST_DATABASE["attic"]["label"],
             "low": DUBLIN_COST_DATABASE["attic"]["low"],
             "high": DUBLIN_COST_DATABASE["attic"]["high"],
-            "scope": "Requires floor joist reinforcement and compliance with TGD Part B (Fire Escape)."
-        })
-    if any(k in text for k in ["wire", "rewire", "electrics"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["rewire"]["label"],
-            "low": DUBLIN_COST_DATABASE["rewire"]["low"],
-            "high": DUBLIN_COST_DATABASE["rewire"]["high"],
-            "scope": "Full chasing of masonry walls and RECI certification."
-        })
-    if any(k in text for k in ["wrap", "insulate", "external", "ewi"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["insulation"]["label"],
-            "low": DUBLIN_COST_DATABASE["insulation"]["low"],
-            "high": DUBLIN_COST_DATABASE["insulation"]["high"],
-            "scope": "Requires sill depth extensions and rainwater pipe redirection."
-        })
-    return estimates
-
-# ---------------------------------------------------------
-# STREAMLIT TWO-COLUMN UI LAYOUT
-# ---------------------------------------------------------
-left_panel, right_panel = st.columns(2)
-
-with left_panel:
-    st.subheader("1. Ingest Property Coordinates")
-    property_url = st.text_input(
-        "Daft.ie / MyHome.ie Listing URL", 
-        value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-dublin-8/6655188"
-    )
-    
-    extracted_street = "Target Property"
-    extracted_postcode = "DUBLIN COUNTY"
-    
-    if property_url:
-        parsed_url = parse_dublin_url(property_url)
-        extracted_street = parsed_url["street"]
-        extracted_postcode = parsed_url["postcode"]
-        st.success("Listing Ingested: " + parsed_url["address"])
-
-    # Establish geography and lat/lon bounds
-    is_d08 = "D08" in extracted
+            "scope": "Requires flo
