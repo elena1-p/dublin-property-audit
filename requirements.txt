@@ -1,5 +1,7 @@
-streamlit>=1.30.0
-pypdf>=3.17.0
-folium>=0.15.0
-streamlit-folium>=0.18.0
-fpdf2>=2.7.0
+streamlit>=1.35.0
+google-generativeai>=0.8.3
+folium
+streamlit-folium
+fpdf2
+pillow
+pandas
