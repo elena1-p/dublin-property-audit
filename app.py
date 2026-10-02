@@ -2,269 +2,231 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 from PIL import Image
-import datetime
+import json
 
-# --- CONFIGURATION & PAGE SETUP ---
-st.set_page_config(page_title="Dublin Property Forensics & Valuation App", layout="wide", page_icon="🏠")
+# --- PAGE SETUP ---
+st.set_page_config(page_title="Dublin Property Forensics & Audit", layout="wide", page_icon="🏡")
 
-# Initialize Gemini Client
+# Initialize Gemini Client via Streamlit Secrets
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 if api_key:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 else:
-    st.warning("⚠️ Gemini API Key not configured. AI features will run in demo/mock mode.")
+    model = None
 
-# --- TITLE & INTRO ---
-st.title("🏠 Dublin Property Forensics & Valuation App")
-st.markdown("Automate physical audits, analyze retrofitting costs, parse BER PDFs, and project 3-5 year valuation metrics.")
+st.title("🏡 Dublin Property Forensics & Comprehensive Retrofit Audit")
+st.markdown("Automate property analysis, inspect images/BER documents, and compute precise pathways to **B3** and **A** ratings.")
 st.markdown("---")
 
-# --- LAYOUT: INPUTS (LEFT) vs ANALYSIS (RIGHT) ---
-col_input, col_analysis = st.columns(2)
+# Session State for Dynamic Custom Works
+if "custom_works" not in st.session_state:
+    st.session_state.custom_works = []
+
+# --- LEFT COLUMN: DATA INGESTION & AUDIT INPUTS ---
+col_input, col_audit = st.columns()
 
 with col_input:
-    st.header("📇 Property Identifiers")
-    
-    # Daft.ie URL Ingestion
-    daft_url = st.text_input(
-        "Daft.ie Listing URL", 
-        placeholder="https://www.daft.ie/for-sale/...",
-        help="Paste the Daft.ie link to track this property"
-    )
-    
-    eircode = st.text_input("Eircode", value="D14 F8H3", max_chars=8, help="Ensures exact geospatial matching")
-    asking_price = st.number_input("Asking Price (€)", min_value=10000, value=650000, step=10000)
-    floor_area = st.number_input("True Floor Area (m²)", min_value=20, value=85, step=5)
-    
-    # BER PDF Uploader
-    st.markdown("---")
-    st.header("📄 BER PDF Certificate Parsing")
-    ber_pdf = st.file_uploader("Upload Official SEAI BER Report (PDF)", type=["pdf"])
-    
-    extracted_ber = "D1"  # Default fallback
-    
-    if ber_pdf is not None:
-        if api_key:
-            with st.spinner("Gemini is reading and extracting data from your BER PDF..."):
-                try:
-                    # Read PDF bytes directly for Gemini 1.5 Flash
-                    pdf_bytes = ber_pdf.read()
-                    pdf_part = {
-                        "mime_type": "application/pdf",
-                        "data": pdf_bytes
-                    }
-                    
-                    prompt = """
-                    You are an expert Irish building surveyor. Parse this official SEAI BER Certificate PDF.
-                    Extract and return ONLY a valid JSON block with these keys:
-                    {
-                      "ber_rating": "The letter grade e.g. A1, B2, C3, D1, G",
-                      "energy_indicator": "The numeric value in kWh/m²/yr",
-                      "dwelling_type": "e.g. Mid-terrace, Semi-detached, Detached"
-                    }
-                    Do not write any markdown wrappers other than raw JSON.
-                    """
-                    
-                    response = model.generate_content([prompt, pdf_part])
-                    # Clean response to get raw JSON
-                    cleaned_response = response.text.replace("```json", "").replace("```", "").strip()
-                    import json
-                    ber_data = json.loads(cleaned_response)
-                    
-                    extracted_ber = ber_data.get("ber_rating", "D1")
-                    st.success(f"🎉 Successfully parsed BER: **{extracted_ber}** ({ber_data.get('energy_indicator')} kWh/m²/yr)")
-                except Exception as e:
-                    st.error(f"Could not parse PDF automatically: {e}. Defaulting to manual selection.")
-        else:
-            st.info("💡 PDF uploaded! (Connect your Gemini API Key in secrets to enable automatic parsing).")
-
-    # Manual override/selection if PDF parsing wasn't run or failed
-    current_ber = st.selectbox(
-        "Current BER Rating (Auto-filled from PDF if uploaded)", 
-        ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], 
-        index=["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"].index(extracted_ber)
-    )
+    st.header("1. Property Identifiers")
+    daft_url = st.text_input("Daft.ie / MyHome Listing URL", placeholder="https://www.daft.ie/for-sale/...")
+    eircode = st.text_input("Eircode", value="D14 F8H3")
+    asking_price = st.number_input("Asking Price (€)", min_value=50000, value=650000, step=10000)
+    floor_area = st.number_input("Floor Area (m²)", min_value=20, value=85, step=5)
     
     st.markdown("---")
-    st.header("🛠️ Planned Renovations")
-    works_list = st.multiselect(
-        "Select projects you want to complete:",
-        ["Internal Dry-lining (IWI)", "External Wall Insulation (EWI)", "Heat Pump Install", "Solar PV Panels", "Full Rewire", "Attic Conversion", "Rear Extension"],
-        default=["Heat Pump Install", "Solar PV Panels"]
-    )
+    st.header("2. BER Certificate Analysis")
+    ber_pdf = st.file_uploader("Upload Official SEAI BER PDF", type=["pdf"])
     
+    extracted_ber = "D1"
+    energy_kwh = 245
+    
+    if ber_pdf is not None and model:
+        with st.spinner("AI parsing official SEAI BER PDF..."):
+            try:
+                pdf_bytes = ber_pdf.read()
+                pdf_part = {"mime_type": "application/pdf", "data": pdf_bytes}
+                prompt = """
+                Parse this SEAI BER PDF certificate. Return ONLY a valid JSON object with:
+                {"ber_rating": "letter grade e.g. D1", "energy_kwh": numeric value in kWh/m2/yr, "dwelling_type": "string"}
+                Do not include backticks or markdown formatting.
+                """
+                response = model.generate_content([prompt, pdf_part])
+                cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
+                data = json.loads(cleaned_text)
+                extracted_ber = data.get("ber_rating", "D1")
+                energy_kwh = float(data.get("energy_kwh", 245))
+                st.success(f"Parsed: **{extracted_ber}** ({energy_kwh} kWh/m²/yr)")
+            except Exception as e:
+                st.error(f"Error reading PDF: {e}. Defaulting to manual selection.")
+                
+    ber_list = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"]
+    current_ber = st.selectbox("Current BER Rating", ber_list, index=ber_list.index(extracted_ber) if extracted_ber in ber_list else 9)
+
     st.markdown("---")
-    st.header("📸 Media Ingestion (AI Vision)")
-    uploaded_photo = st.file_uploader("Upload utility board, attic, damp patches, or general photos", type=["jpg", "jpeg", "png"])
+    st.header("3. Standard Energy Retrofit Measures")
+    standard_works = st.multiselect(
+        "Select SEAI-eligible measures you plan to carry out:",
+        ["Heat Pump System", "Solar PV (10 Panels + Inverter)", "External Wall Insulation (EWI)", "Internal Dry-Lining (IWI)", "Attic Insulation Top-up", "Triple Glazed Windows & Doors", "Demand Controlled Ventilation (DCV)"],
+        default=["Heat Pump System", "Solar PV (10 Panels + Inverter)"]
+    )
 
+    st.markdown("---")
+    st.header("4. Add Custom Desired Works")
+    with st.expander("➕ Add Custom Non-Energy Renovations", expanded=True):
+        new_work_name = st.text_input("Work Description", placeholder="e.g. Knock down kitchen wall & install steel beam")
+        col_w1, col_w2 = st.columns(2)
+        new_work_cost = col_w1.number_input("Estimated Cost (€)", min_value=0, value=5000, step=500)
+        causes_delay = col_w2.checkbox("Requires Vacating House?", value=False)
+        
+        if st.button("Add Work Item"):
+            if new_work_name:
+                st.session_state.custom_works.append({
+                    "name": new_work_name,
+                    "cost": new_work_cost,
+                    "vacate": causes_delay
+                })
+                st.rerun()
 
-# --- COMPUTATION ENGINE ---
+    if st.session_state.custom_works:
+        st.write("**Current Custom Works List:**")
+        for idx, item in enumerate(st.session_state.custom_works):
+            st.caption(f"• **{item['name']}** — €{item['cost']:,} ({'Unhabitable during work' if item['vacate'] else 'Habitable'})")
+        if st.button("Clear Custom Works"):
+            st.session_state.custom_works = []
+            st.rerun()
 
-# 1. True Sold €/m² Matrix Database (Using Representative Dublin PPR + CSO Multipliers)
-@st.cache_data
-def get_comparative_matrix(asking, area):
-    data = [
-        {"Address": "Target House", "Sale Date": "Live", "PPR Price": asking, "CSO Index Multiplier": 1.00, "Typology": "End-Terrace", "BER": "D1", "Area (m²)": area},
-        {"Address": "14 Roebuck Downs", "Sale Date": "2024-03", "PPR Price": 520000, "CSO Index Multiplier": 1.10, "Typology": "Mid-Terrace", "BER": "C2", "Area (m²)": 82},
-        {"Address": "22 Roebuck Downs", "Sale Date": "2022-09", "PPR Price": 450000, "CSO Index Multiplier": 1.24, "Typology": "End-Terrace", "BER": "G", "Area (m²)": 90},
-        {"Address": "5 Clonskeagh Road", "Sale Date": "2025-01", "PPR Price": 680000, "CSO Index Multiplier": 1.06, "Typology": "Semi-Detached", "BER": "B3", "Area (m²)": 95}
+    st.markdown("---")
+    st.header("5. Visual Forensics Media")
+    uploaded_photo = st.file_uploader("Upload Inspection Photo (Fuse box, damp, walls, cracks)", type=["jpg", "png", "jpeg"])
+
+# --- COMPUTATION & ROADMAP LOGIC ---
+def calculate_pathways(current_rating, area):
+    # Pathway to B3 (Green Mortgage target: <= 125 kWh/m2/yr)
+    b3_steps = [
+        {"measure": "Attic Insulation (300mm quilt)", "gross": 2200, "grant": 1500, "net": 700, "note": "Low disruption, high heat retention"},
+        {"measure": "Heat Pump System with Radiator Upgrades", "gross": 14000, "grant": 6500, "net": 7500, "note": "Replaces oil/gas boiler; requires HLI check"},
+        {"measure": "Demand Controlled Ventilation (DCV)", "gross": 3800, "grant": 1500, "net": 2300, "note": "Eliminates condensation & manages fresh air"}
     ]
-    df = pd.DataFrame(data)
-    df["In Today's Money (€)"] = (df["PPR Price"] * df["CSO Index Multiplier"]).astype(int)
-    df["True €/m²"] = (df["In Today's Money (€)"] / df["Area (m²)"]).round(2)
-    return df
+    
+    # Pathway to A2/A3 (Maximum Value & Net Zero: <= 50 kWh/m2/yr)
+    a_steps = b3_steps + [
+        {"measure": "External Wall Insulation (EWI) 100mm EPS", "gross": 18000, "grant": 8000, "net": 10000, "note": "Eliminates all exterior thermal bridging"},
+        {"measure": "Solar PV (4kWp system + 5kWh battery)", "gross": 8500, "grant": 2100, "net": 6400, "note": "Offsets electrical loads and heat pump running cost"},
+        {"measure": "High Performance Triple Glazing", "gross": 12000, "grant": 0, "net": 12000, "note": "Acoustic insulation + U-value < 0.8 W/m²K"}
+    ]
+    return b3_steps, a_steps
 
-# 2. SEAI Retrofit Costs & Grants Engine
-def compute_retrofit_metrics(current_ber, selected_works):
-    base_retrofit_cost_by_rating = {
-        'G': 85000, 'F': 75000, 'E1': 65000, 'E2': 65000,
-        'D1': 55000, 'D2': 55000, 'C1': 25000, 'C2': 20000,
-        'C3': 15000, 'B3': 0, 'B2': 0, 'B1': 0, 'A': 0
-    }
-    
-    gross_base = base_retrofit_cost_by_rating.get(current_ber, 50000)
-    
-    # Calculate cumulative grants
-    seai_grants = 0
-    if "Heat Pump Install" in selected_works:
-        seai_grants += 6500
-    if "Solar PV Panels" in selected_works:
-        seai_grants += 2100
-    if "External Wall Insulation (EWI)" in selected_works:
-        seai_grants += 8000
-    if "Internal Dry-lining (IWI)" in selected_works:
-        seai_grants += 4500
-    
-    # Custom renovation works pricing
-    custom_works_cost = 0
-    if "Full Rewire" in selected_works:
-        custom_works_cost += 10000
-    if "Attic Conversion" in selected_works:
-        custom_works_cost += 25000
-    if "Rear Extension" in selected_works:
-        custom_works_cost += 60000
-        
-    gross_total = gross_base + custom_works_cost
-    net_total = max(0, gross_total - seai_grants)
-    
-    # Determine Habitability Status
-    habitability = "🟢 Habitable (Move in immediately)"
-    delay = "0 Weeks"
-    if "Full Rewire" in selected_works or "Internal Dry-lining (IWI)" in selected_works:
-        habitability = "🔴 Unhabitable (Significant internal structural disruption)"
-        delay = "8–12 Weeks Move-In Delay"
-        
-    return gross_total, seai_grants, net_total, habitability, delay
+b3_path, a_path = calculate_pathways(current_ber, floor_area)
 
-# 3. Future Resale and Rental Projection (3-5 Years)
-def run_predictive_analytics(asking, net_retrofit_cost, current_ber):
-    cagr = 0.040  # South Dublin benchmark
-    upgrade_premium = 1.11 if current_ber in ['D1', 'D2', 'E1', 'E2', 'F', 'G'] else 1.00
-    
-    future_cost_basis = asking + net_retrofit_cost
-    resell_3yr = future_cost_basis * ((1 + cagr) ** 3) * upgrade_premium
-    resell_5yr = future_cost_basis * ((1 + cagr) ** 5) * upgrade_premium
-    
-    # Rental limits (Rent Pressure Zone checks)
-    current_avg_rent_m2 = 25.00  # Dundrum/Stillorgan electoral area average
-    base_rent = floor_area * current_avg_rent_m2
-    
-    if net_retrofit_cost < 30000:
-        # RPZ legal cap of 2% maximum per year
-        rent_3yr = base_rent * ((1 + 0.02) ** 3)
-        rent_5yr = base_rent * ((1 + 0.02) ** 5)
-        rent_note = "Legally capped under RTB guidelines (RPZ 2% limit applied)."
-    else:
-        # Exempt from RPZ limits because deep retrofit was performed (substantial change in nature)
-        rent_3yr = base_rent * ((1 + 0.045) ** 3)
-        rent_5yr = base_rent * ((1 + 0.045) ** 5)
-        rent_note = "🎉 RPZ Exempt! Deep retrofit upgrades exempt you from the legal 2% rent cap."
-        
-    return resell_3yr, resell_5yr, rent_3yr, rent_5yr, rent_note
+# Compute custom works totals
+custom_cost_total = sum(item["cost"] for item in st.session_state.custom_works)
+any_custom_unhabitable = any(item["vacate"] for item in st.session_state.custom_works)
 
+# Grant lookups for selected standard works
+grant_lookup = {
+    "Heat Pump System": {"gross": 14000, "grant": 6500},
+    "Solar PV (10 Panels + Inverter)": {"gross": 7500, "grant": 2100},
+    "External Wall Insulation (EWI)": {"gross": 18000, "grant": 8000},
+    "Internal Dry-Lining (IWI)": {"gross": 12000, "grant": 4500},
+    "Attic Insulation Top-up": {"gross": 2200, "grant": 1500},
+    "Triple Glazed Windows & Doors": {"gross": 12000, "grant": 0},
+    "Demand Controlled Ventilation (DCV)": {"gross": 3800, "grant": 1500}
+}
 
-# --- ANALYSIS VIEW (RIGHT) ---
-with col_analysis:
-    tab_overview, tab_comps, tab_vision = st.tabs(["📊 Valuation & Forecasting", "📋 True Sold €/m² Matrix", "👁️ AI Vision Forensics"])
+selected_gross = sum(grant_lookup[w]["gross"] for w in standard_works)
+selected_grants = sum(grant_lookup[w]["grant"] for w in standard_works)
+selected_net = selected_gross - selected_grants
+
+total_out_of_pocket = selected_net + custom_cost_total
+
+# Habitability
+is_unhabitable = (
+    "Internal Dry-Lining (IWI)" in standard_works or 
+    any_custom_unhabitable
+)
+
+# Valuation Projections (4% CAGR baseline + 11% B3+ Green Premium)
+cagr = 0.04
+resale_3yr = (asking_price + total_out_of_pocket) * ((1 + cagr) ** 3) * 1.11
+resale_5yr = (asking_price + total_out_of_pocket) * ((1 + cagr) ** 5) * 1.11
+
+# --- RIGHT COLUMN: COMPREHENSIVE AUDIT REPORT ---
+with col_audit:
+    st.header("📋 Comprehensive Audit & Retrofit Blueprint")
     
-    # Call computation engines
-    gross_cost, total_grants, net_cost, habitability_status, move_delay = compute_retrofit_metrics(current_ber, works_list)
-    resell_3, resell_5, rent_3, rent_5, rent_disclaimer = run_predictive_analytics(asking_price, net_cost, current_ber)
-
-    with tab_overview:
-        st.subheader("🏡 Financial Blueprint & Projections")
-        
-        # Display Daft URL if submitted
+    tab_report, tab_b3, tab_a, tab_vision = st.tabs([
+        "📄 Full Audit Report", 
+        "🎯 Roadmap to B3", 
+        "🏆 Roadmap to A-Rating", 
+        "👁️ Visual Forensics"
+    ])
+    
+    with tab_report:
+        st.subheader("Executive Audit Summary")
         if daft_url:
-            st.caption(f"🔗 Tracking Listing: [{daft_url}]({daft_url})")
+            st.caption(f"Target Listing: [{daft_url}]({daft_url})")
             
-        # Row 1 Key Metrics
         m1, m2, m3 = st.columns(3)
-        m1.metric("Est. Net Retrofit Cost", f"€{net_cost:,}")
-        m2.metric("3-Year Future Resell Value", f"€{int(resell_3):,}")
-        m3.metric("5-Year Future Resell Value", f"€{int(resell_5):,}")
+        m1.metric("Current Asking Baseline", f"€{asking_price:,}")
+        m2.metric("Net Works Budget", f"€{total_out_of_pocket:,}")
+        m3.metric("Projected 5-Yr Resale", f"€{int(resale_5yr):,}")
         
-        # Row 2 Key Metrics
-        r1, r2 = st.columns(2)
-        r1.metric("Est. Monthly Rent (3 Years)", f"€{int(rent_3):,}")
-        r2.metric("Est. Monthly Rent (5 Years)", f"€{int(rent_5):,}")
-        st.info(f"**Rent Calculation Notice:** {rent_disclaimer}")
+        st.markdown("#### 1. Financial Breakdown")
+        fin_data = [
+            {"Category": "Standard Energy Retrofit (Gross)", "Amount (€)": f"€{selected_gross:,}"},
+            {"Category": "SEAI Grant Subsidies (Deductions)", "Amount (€)": f"-€{selected_grants:,}"},
+            {"Category": "Custom Desired Works (Net)", "Amount (€)": f"€{custom_cost_total:,}"},
+            {"Category": "Total Out-of-Pocket Capital Required", "Amount (€)": f"€{total_out_of_pocket:,}"}
+        ]
+        st.table(pd.DataFrame(fin_data))
         
-        # Habitability Alert
-        st.markdown("### 🗓️ Project Timeline & Move-in Status")
-        st.write(f"**Status:** {habitability_status}")
-        if move_delay != "0 Weeks":
-            st.warning(f"**Estimated Delay:** {move_delay}. Ensure alternative accommodation is budgeted.")
-            
-    with tab_comps:
-        st.subheader("📈 'True Sold €/m²' Comparative Matrix Table")
-        st.write("This table matches geocoded Property Price Register (PPR) records with CSO dynamic price indices:")
+        st.markdown("#### 2. Habitability & Timeline Projection")
+        if is_unhabitable:
+            st.error("🔴 **Status: Property Unhabitable During Major Works**")
+            st.markdown("- **Estimated Delay:** 8–12 weeks before move-in.")
+            st.markdown("- **Drivers:** Wall dry-lining or custom invasive structural renovations selected.")
+        else:
+            st.success("🟢 **Status: Habitable on Day 1 (Phased External Works)**")
+            st.markdown("- Works can be carried out externally (Heat Pump, Solar PV, EWI) while residing in the home.")
+
+    with tab_b3:
+        st.subheader("🎯 Minimum Retrofit Roadmap to B3 (Green Mortgage Tier)")
+        st.info("💡 Achieving **B3** unlocks green mortgage rates (~0.50% to 0.75% interest discount) and provides the best return on investment.")
         
-        matrix_df = get_comparative_matrix(asking_price, floor_area)
-        st.dataframe(matrix_df, use_container_width=True)
+        b3_df = pd.DataFrame(b3_path)
+        b3_df.columns = ["Recommended Measure", "Gross (€)", "SEAI Grant (€)", "Net (€)", "Technical Specification"]
+        st.dataframe(b3_df, use_container_width=True)
         
-        # Extra Analysis Callout
-        st.markdown("""
-        🔍 **How to use this matrix:**
-        - Check if the **Target House True €/m²** is lower than its immediate neighbors. 
-        - If the adjusted historical transactions are consistently below the target's baseline of **€{:.2f}/m²**, the target property is currently overvalued compared to historical street averages.
-        """.format(asking_price/floor_area))
+        total_b3_net = sum(item["net"] for item in b3_path)
+        st.markdown(f"**Total Net Cost to Achieve B3:** `€{total_b3_net:,}`")
+
+    with tab_a:
+        st.subheader("🏆 Deep Retrofit Roadmap to A2/A3 (Net Zero Standard)")
+        st.info("💡 An **A-Rating** delivers maximum market resilience, eliminates fossil fuels, and commands an additional 10–14% resale premium in Dublin.")
+        
+        a_df = pd.DataFrame(a_path)
+        a_df.columns = ["Recommended Measure", "Gross (€)", "SEAI Grant (€)", "Net (€)", "Technical Specification"]
+        st.dataframe(a_df, use_container_width=True)
+        
+        total_a_net = sum(item["net"] for item in a_path)
+        st.markdown(f"**Total Net Cost to Achieve A-Rating:** `€{total_a_net:,}`")
 
     with tab_vision:
-        st.subheader("🕵️‍♂️ AI Computer Vision Inspection")
-        if uploaded_photo is not None:
-            image = Image.open(uploaded_photo)
-            st.image(image, caption="Uploaded Property Media File", use_container_width=True)
-            
-            if st.button("Trigger AI Forensic Scan"):
-                if api_key:
-                    with st.spinner("Analyzing image patterns via Gemini 1.5 Flash..."):
-                        try:
-                            prompt = """
-                            Inspect this residential property inspection photo as an expert Irish forensic surveyor.
-                            Analyze the image for:
-                            1. Stepped structural cracks or diagonal lintel stress.
-                            2. Wall-to-ceiling corners for damp, condensation, bubbling plaster, or mould.
-                            3. Utility check: Is the boiler/cylinder outmoded, or does the fuse board require a rewire (black case / ceramic fuses)?
-                            4. "Grey-floor flip" markers: Cosmetic superficial upgrades masking structural decay.
-                            
-                            Return your findings organized under the headings:
-                            - **Visual Observation**
-                            - **Severity Risk** (Low/Medium/High)
-                            - **Estimated Budget Impact** (EUR)
-                            """
-                            response = model.generate_content([prompt, image])
-                            st.markdown(response.text)
-                        except Exception as e:
-                            st.error(f"Error querying Gemini API: {e}")
-                else:
-                    # Mock Fallback when key is missing
-                    st.info("💡 **Mock Analysis Output (To enable live analysis, add your Gemini API Key):**")
-                    st.markdown("""
-                    - **Visual Observation:** Image indicates potential high-contrast cosmetic laminate flooring juxtaposed against older baseboard timber junctions. 
-                    - **Severity Risk:** **Medium**
-                    - **Estimated Budget Impact:** €1,500 – €3,000 for subfloor leveling and damp sealing treatment.
-                    """)
+        st.subheader("👁️ AI Visual Risk & Forensic Inspection")
+        if uploaded_photo and model:
+            img = Image.open(uploaded_photo)
+            st.image(img, caption="Inspection Media", use_container_width=True)
+            if st.button("Run Forensic Vision Analysis"):
+                with st.spinner("Analyzing building conditions via Gemini 1.5 Flash..."):
+                    v_prompt = """
+                    Act as an expert building surveyor in Dublin. Inspect this residential property image:
+                    1. Identify risks: damp marks, stepped structural cracking, outdated wiring/fuse boards, or cosmetic flips masking defects.
+                    2. Estimate remedial costs in EUR.
+                    3. Highlight if this defect interferes with reaching BER B3 or A rating.
+                    """
+                    v_res = model.generate_content([v_prompt, img])
+                    st.markdown(v_res.text)
+        elif not model:
+            st.warning("Add your free Gemini API key to Streamlit secrets to run live vision checks.")
         else:
-            st.write("Upload a photo in the sidebar (e.g., attic joints, walls, hot press, or utility panels) to run live computer vision checks.")
+            st.caption("Upload a photo in section 5 to trigger forensic visual checks.")
