@@ -7,11 +7,12 @@ import folium
 from streamlit_folium import st_folium
 from fpdf import FPDF
 import datetime
-import io
+import requests
+import re
 
 # --- PAGE SETUP ---
 st.set_page_config(
-    page_title="360 Forensic Property & Risk Audit Protocol", 
+    page_title="360° Forensic Property & Risk Audit Protocol (v6.0)", 
     layout="wide", 
     page_icon="🏛️"
 )
@@ -33,11 +34,23 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🏛️ 360 Forensic Property & Comprehensive Risk Audit")
+st.title("🏛️ 360° Forensic Property & Comprehensive Risk Audit")
 st.markdown("**Executive Acquisition & Structural Advisory System (v6.0) — Dublin Residential Market**")
 st.markdown("---")
 
-# Session state for persistent audit results, custom works, and AI estimations
+# Initialize Session State values for auto-fill fields
+if "address" not in st.session_state:
+    st.session_state.address = "12 Connolly Gardens, Inchicore, Dublin 8 (D08 F5P6)"
+if "eircode" not in st.session_state:
+    st.session_state.eircode = "D08 F5P6"
+if "price" not in st.session_state:
+    st.session_state.price = 525000
+if "area" not in st.session_state:
+    st.session_state.area = 94.59
+if "ber" not in st.session_state:
+    st.session_state.ber = "B2"
+if "year" not in st.session_state:
+    st.session_state.year = 1950
 if "audit_report" not in st.session_state:
     st.session_state.audit_report = None
 if "custom_works" not in st.session_state:
@@ -103,13 +116,64 @@ col_inputs, col_output = st.columns(2)
 
 with col_inputs:
     st.header("1. Core Property & Buyer Profile")
-    target_address = st.text_input("Property Address & Postal Code", value="12 Connolly Gardens, Inchicore, Dublin 8 (D08 F5P6)")
-    eircode = st.text_input("Eircode", value="D08 F5P6", max_chars=8)
+    
+    # Daft.ie / MyHome.ie URL Prefiller Console
     daft_url = st.text_input("Listing URL (Daft.ie / MyHome.ie)", value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-dublin-8/6655188")
     
+    if st.button("🔍 Import Listing Details from URL", use_container_width=True):
+        if not daft_url:
+            st.warning("Please enter a valid listing URL first!")
+        elif not model:
+            st.error("Connect your Gemini API Key in secrets to enable automatic pre-filling.")
+        else:
+            with st.spinner("AI parsing and pre-filling listing details..."):
+                try:
+                    # Let Gemini do the parsing via web-grounding/searching
+                    ref_prompt = f"""
+                    You are a real estate data scraper. Extract information for this Dublin property listing: {daft_url}
+                    Using search and page reading tools, identify:
+                    1. Property Address (full address)
+                    2. Eircode (if mentioned, otherwise predict based on location or default to Dublin 8/14 format e.g. D08 F5P6)
+                    3. Price (extract numeric value, e.g. 525000)
+                    4. Floor Area in sqm (extract numeric value, e.g. 94.59)
+                    5. BER Rating (extract e.g. B2, C3, D1)
+                    6. Year of construction (if mentioned, otherwise predict based on era or default to 1950)
+                    
+                    Return ONLY a raw JSON block with the following keys, no markdown wrappers:
+                    {{
+                      "address": "string",
+                      "eircode": "string",
+                      "price": 525000,
+                      "area": 94.59,
+                      "ber": "B2",
+                      "year": 1950
+                    }}
+                    """
+                    response = model.generate_content(ref_prompt)
+                    cleaned_json = response.text.replace("```json", "").replace("```", "").strip()
+                    scraped_data = json.loads(cleaned_json)
+                    
+                    # Store in session state to dynamically auto-fill fields
+                    st.session_state.address = scraped_data.get("address", st.session_state.address)
+                    st.session_state.eircode = scraped_data.get("eircode", st.session_state.eircode)
+                    st.session_state.price = int(scraped_data.get("price", st.session_state.price))
+                    st.session_state.area = float(scraped_data.get("area", st.session_state.area))
+                    st.session_state.ber = scraped_data.get("ber", st.session_state.ber)
+                    st.session_state.year = int(scraped_data.get("year", st.session_state.year))
+                    
+                    st.success("🎉 Pre-filled successfully! Verify the fields below.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Auto-fill failed: {e}. You can manually adjust the fields below.")
+
+    st.markdown("---")
+    # Bind fields directly to Session State to enable dynamic updates
+    target_address = st.text_input("Property Address & Postal Code", value=st.session_state.address)
+    eircode = st.text_input("Eircode", value=st.session_state.eircode, max_chars=8)
+    
     c1, c2 = st.columns(2)
-    asking_price = c1.number_input("Asking Price (€)", min_value=50000, value=525000, step=5000)
-    floor_area = c2.number_input("Floor Area (m²)", min_value=20.0, value=94.59, step=1.0)
+    asking_price = c1.number_input("Asking Price (€)", min_value=50000, value=st.session_state.price, step=5000)
+    floor_area = c2.number_input("Floor Area (m²)", min_value=20.0, value=st.session_state.area, step=1.0)
     
     c3, c4 = st.columns(2)
     budget_max = c3.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
@@ -119,7 +183,7 @@ with col_inputs:
     st.header("2. BER Certificate Analysis")
     ber_pdf = st.file_uploader("Upload Official SEAI BER Report (PDF)", type=["pdf"])
     
-    extracted_ber = "D1"
+    extracted_ber = st.session_state.ber
     energy_kwh = 245
     
     if ber_pdf is not None and model:
@@ -143,6 +207,9 @@ with col_inputs:
                 
     ber_list = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"]
     current_ber = st.selectbox("Current BER Rating", ber_list, index=ber_list.index(extracted_ber) if extracted_ber in ber_list else 9)
+    
+    # Restored 'construction_year' input field to resolve NameError
+    construction_year = st.number_input("Year of Construction", min_value=1850, max_value=2026, value=st.session_state.year)
 
     st.markdown("---")
     st.header("3. Standard Energy Retrofit Measures")
@@ -177,7 +244,7 @@ with col_inputs:
                         Analyze the following requested work: "{new_work_name}"
                         
                         Property Context:
-                        - Built Year: 1950
+                        - Built Year: {construction_year}
                         - Current Area: {floor_area} m²
                         
                         Based on the uploaded image (if any), the floor plan layout, the materials needed, and current 2026 Irish building construction market rates:
@@ -286,7 +353,7 @@ with col_output:
                             uploaded_photo.seek(0)
                             content_payload.append(Image.open(uploaded_photo))
                             
-                        custom_works_str = "\\n".join([f"- {item['name']}: €{item['cost']}" for item in st.session_state.custom_works])
+                        custom_works_str = "\n".join([f"- {item['name']}: €{item['cost']}" for item in st.session_state.custom_works])
                             
                         master_prompt = f"""
                         You are the Lead Forensic Building Surveyor, Real Estate Acquisition Strategist, and Legal Risk Auditor for high-value residential property purchases in Dublin, Ireland.
@@ -325,7 +392,7 @@ with col_output:
                            - Analyze layout footprint, room compromises (Box Room warning if bedroom < 7.0 m²), and livability checks (Ground floor guest WC, utility room).
                            - Identify visual risks (fuse board type, signs of damp/condensation).
                            
-                        4. **SECTION 3: ERA-SPECIFIC FABRIC, SEAI RETROFIT & STRUCTURE:**
+                        4. **SECTION 3: ERA-SPECRIC FABRIC, SEAI RETROFIT & STRUCTURE:**
                            - Era Construction Profile (fabric, solid concrete/cavity wall, acoustic separation).
                            - Advise on step-by-step works to bring this property from current BER {current_ber} to B3 (Green Mortgage eligibility) and to an 'A' rating (Heat pump, Solar PV, MVHR) with grants.
                            - Timeline & Habitability Audit (Habitable on Day 1 vs move-in delays).
@@ -440,69 +507,4 @@ with col_output:
             icon=folium.Icon(color="red", icon="home")
         ).add_to(m)
         
-        # Add dynamic spatial hazards based on local Eircode catchments
-        if is_d08:
-            folium.Circle(
-                location=[53.3415, -6.3160],
-                radius=180,
-                color="blue",
-                fill=True,
-                fill_color="blue",
-                fill_opacity=0.35,
-                popup="🔴 **OPW Fluvial Flood Risk: River Camac Catchment**"
-            ).add_to(m)
-            
-            folium.Marker(
-                [53.3395, -6.3145],
-                popup="✅ **Planning Precedent (Approved):** 2-storey rear extension and loft conversion (Reference: 2981/24)",
-                icon=folium.Icon(color="green", icon="info-sign")
-            ).add_to(m)
-            
-            # Map dynamic CSV sales directly on map if loaded
-            if csv_df is not None:
-                for idx, row in csv_df.iterrows():
-                    folium.Marker(
-                        [53.3400 + (idx*0.0001), -6.3150 - (idx*0.0001)], # staggered for demo
-                        popup=f"🟢 {row['Address']} - Today's Money: EUR {row['In Today Money (€)']:,}",
-                        icon=folium.Icon(color="green", icon="usd")
-                    ).add_to(m)
-            else:
-                folium.Marker(
-                    [53.3400, -6.3150],
-                    popup="🟢 **10 Connolly Gardens (Sold):** €665k (Feb 2026)",
-                    icon=folium.Icon(color="green", icon="usd")
-                ).add_to(m)
-            
-        elif is_d14:
-            folium.Circle(
-                location=[53.2970, -6.2480],
-                radius=200,
-                color="blue",
-                fill=True,
-                fill_color="blue",
-                fill_opacity=0.3,
-                popup="⚠️ **OPW Flood Risk: River Dodder Catchment**"
-            ).add_to(m)
-            
-            folium.Marker(
-                [53.2940, -6.2435],
-                popup="✅ **Planning Precedent (Approved):** Dormer attic conversion (Reference: D23A/0451)",
-                icon=folium.Icon(color="green", icon="info-sign")
-            ).add_to(m)
-            
-            if csv_df is not None:
-                for idx, row in csv_df.iterrows():
-                    folium.Marker(
-                        [53.2945 + (idx*0.0001), -6.2440 - (idx*0.0001)],
-                        popup=f"🟢 {row['Address']} - Today's Money: EUR {row['In Today Money (€)']:,}",
-                        icon=folium.Icon(color="green", icon="usd")
-                    ).add_to(m)
-            else:
-                folium.Marker(
-                    [53.2945, -6.2440],
-                    popup="🟢 **14 Roebuck Downs (Sold):** €520k",
-                    icon=folium.Icon(color="green", icon="usd")
-                ).add_to(m)
-            
-        # Render Map
-        st_folium(m, width=700, height=450)
+     
