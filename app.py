@@ -217,8 +217,38 @@ with left_panel:
         map_lat, map_lon = 53.3402, -6.3156
 
     st.subheader("2. BER Document Ingestion (Combined Slot)")
-    ber_pdfs = st.file_uploader(
-        "Upload SEAI Technical Files (PDFs)", 
-        type=["pdf"], 
-        accept_multiple_files=True,
-      
+    ber_pdfs = st.file_uploader("Upload SEAI Technical Files (PDFs)", type=["pdf"], accept_multiple_files=True, key="multi_ber")
+    
+    ber_texts = []
+    pdf_metrics = {"size": None, "ber": None}
+    
+    if ber_pdfs:
+        for idx, pdf in enumerate(ber_pdfs):
+            text = extract_text_from_pdf(pdf.read())
+            ber_texts.append(text)
+            st.info(f"File {idx+1} ({pdf.name}) parsed successfully.")
+            extracted = extract_metrics_from_ber_text(text)
+            if extracted["size"]:
+                pdf_metrics["size"] = extracted["size"]
+            if extracted["ber"]:
+                pdf_metrics["ber"] = extracted["ber"]
+
+    st.subheader("3. Asset Media & Spatial Uploads")
+    media_tab1, media_tab2 = st.tabs(["📁 File Uploader", "📋 Clipboard Paste Area"])
+    
+    uploaded_media = []
+    with media_tab1:
+        uploaded_media = st.file_uploader(
+            "Upload Photos / Plans", 
+            type=["png", "jpg", "jpeg"], 
+            accept_multiple_files=True
+        )
+            
+    with media_tab2:
+        pasted_data = st.text_input("Clipboard Buffer", placeholder="Ctrl+V or drop an image into this window...")
+
+    st.subheader("🔧 Custom Works")
+    user_narrative = st.text_input("Custom Work Description", value="Knock down main wall and install RSJ beam and a heat pump")
+
+    st.subheader("🛌 Bedroom Dimensions Audit")
+    b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
