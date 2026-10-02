@@ -33,17 +33,8 @@ if "audit_report" not in st.session_state:
     st.session_state.audit_report = ""
 
 # ---------------------------------------------------------
-# INITIALIZE GLOBAL AUDIT STATE & GEOGRAPHIC BASES
+# CONSTANTS & COST DATABASE (Materials & Labour Q3 2026)
 # ---------------------------------------------------------
-total_low = 0
-total_high = 0
-custom_works = []
-
-map_lat, map_lon = 53.3402, -6.3156  # Default Dublin Coordinates (D08 Inchicore)
-is_d08 = True
-is_d14 = False
-
-# Raw Cost Database for Dublin (Materials & Labour Q3 2026)
 DUBLIN_COST_DATABASE = {
     "rsj": {"low": 8000, "high": 12000, "label": "Knock down load-bearing wall & Install steel RSJ"},
     "heat_pump": {"low": 16000, "high": 20000, "label": "Air-to-Water Heat Pump & Radiator retrofitting"},
@@ -55,7 +46,7 @@ DUBLIN_COST_DATABASE = {
 }
 
 # ---------------------------------------------------------
-# PARSING & EXPORT UTILITIES
+# UTILITY PARSING FUNCTIONS
 # ---------------------------------------------------------
 def extract_text_from_pdf(file_bytes):
     if not pypdf:
@@ -85,12 +76,9 @@ def parse_dublin_url(url):
     if not url:
         return None
     clean_url = url.lower().replace("-", " ").replace("_", " ")
-    
-    # Extract postal district
     postcode_match = re.search(r"dublin\s+(\d+[a-z]?)", clean_url)
     postcode = postcode_match.group(0).upper().strip() if postcode_match else "DUBLIN COUNTY"
     
-    # Extract probable street/estate name
     street_parts = []
     tokens = clean_url.split("/")
     target_token = tokens[-1] if tokens[-1] else (tokens[-2] if len(tokens) > 1 else "")
@@ -122,12 +110,9 @@ def clean_pdf_text(text):
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
-        
     text = re.sub(r"\|[-:| ]+\|", "", text)
     text = text.replace("|", "  ")
-    
-    cleaned = text.encode("latin-1", errors="ignore").decode("latin-1")
-    return cleaned
+    return text.encode("latin-1", errors="ignore").decode("latin-1")
 
 def generate_pdf_bytes(report_text, address):
     if not FPDF:
@@ -136,16 +121,6 @@ def generate_pdf_bytes(report_text, address):
     pdf.add_page()
     pdf.set_margins(15, 15, 15)
     
-    pdf.set_font("Helvetica", style="B", size=15)
-    pdf.cell(0, 10, "360 Forensic Property & Comprehensive Risk Audit", ln=True, align="C")
-    pdf.set_font("Helvetica", size=9)
-    pdf.cell(0, 6, "Property: " + address.encode("latin-1", "ignore").decode("latin-1"), ln=True, align="C")
-    pdf.cell(0, 6, "Report Generated: " + datetime.date.today().strftime('%B %d, %Y'), ln=True, align="C")
-    pdf.ln(8)
-    
-    cleaned_text = clean_pdf_text(report_text)
-    for line in cleaned_text.split("\n"):
-        if not line.strip():
-            pdf.ln(3)
-        elif line.strip().startswith("###"):
-            pdf.set_font("He
+    # Fully terminated, safe PDF styling
+    pdf.set_font("Helvetica", style="B", size=14)
+    pdf.cell(0, 10, "360 Forensic Pro
