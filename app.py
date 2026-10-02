@@ -23,7 +23,7 @@ except ImportError:
 
 # Set up page configurations
 st.set_page_config(
-    page_title="Dublin Property Forensic Audit Engine v6.0",
+    page_title="360° Forensic Property & Risk Audit Portal (v6.0)",
     page_icon="🏛️",
     layout="wide"
 )
@@ -185,6 +185,20 @@ def mock_llm_parse_custom_works(narrative):
             "high": DUBLIN_COST_DATABASE["attic"]["high"],
             "scope": "Requires floor joist reinforcement and compliance with TGD Part B (Fire Escape)."
         })
+    if any(k in text for k in ["wire", "rewire", "electrics"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["rewire"]["label"],
+            "low": DUBLIN_COST_DATABASE["rewire"]["low"],
+            "high": DUBLIN_COST_DATABASE["rewire"]["high"],
+            "scope": "Full chasing of masonry walls and RECI certification."
+        })
+    if any(k in text for k in ["wrap", "insulate", "external", "ewi"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["insulation"]["label"],
+            "low": DUBLIN_COST_DATABASE["insulation"]["low"],
+            "high": DUBLIN_COST_DATABASE["insulation"]["high"],
+            "scope": "Requires sill depth extensions and rainwater pipe redirection."
+        })
     return estimates
 
 # ---------------------------------------------------------
@@ -247,8 +261,8 @@ with left_panel:
     with media_tab2:
         pasted_data = st.text_input("Clipboard Buffer", placeholder="Ctrl+V or drop an image into this window...")
 
-    st.subheader("🔧 Custom Works")
-    user_narrative = st.text_input("Custom Work Description", value="Knock down main wall and install RSJ beam and a heat pump")
+    st.subheader("🔧 Planned Alterations & Custom Works")
+    user_narrative = st.text_input("Custom Work Description", value="Knock down main wall to install RSJ beam, rewire, and install a heat pump")
 
     st.subheader("🛌 Bedroom Dimensions Audit")
     b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
@@ -259,6 +273,10 @@ with left_panel:
     
     b3_w = st.number_input("Bedroom 3 Width (m)", value=2.2, step=0.1)
     b3_l = st.number_input("Bedroom 3 Length (m)", value=2.7, step=0.1)
+
+    st.subheader("🚽 SCSI Spatial Metrics")
+    guest_wc = st.checkbox("Downstairs Guest WC Present?", value=False)
+    building_era = st.selectbox("Construction Era", ["Pre-1940 (Period Single-Leaf)", "1940s-1960s (Solid Mass Concrete/Ex-CoCo)", "1970s-1980s (Hollow Block)", "1990s-2006 (Celtic Tiger Cavity/Timber)", "2014+ (Modern BCAR A-Rated)"], index=1)
 
     st.subheader("💰 Buyer Parameters")
     budget_max = st.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
@@ -301,6 +319,21 @@ b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
 b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
 
 # ---------------------------------------------------------
+# MOVE-IN DELAY & HABITABILITY CALCULATOR
+# ---------------------------------------------------------
+is_habitable = "HABITABLE"
+works_duration_weeks = 2
+
+if user_narrative:
+    narr_lower = user_narrative.lower()
+    if any(k in narr_lower for k in ["rewire", "wire", "drylining", "dry-lining", "iwi", "plumb", "replumb"]):
+        is_habitable = "UNINHABITABLE"
+        works_duration_weeks = 10
+    elif any(k in narr_lower for k in ["rsj", "wall", "knock", "extension"]):
+        is_habitable = "DUST WARNING (Ground floor disrupted, liveable upstairs)"
+        works_duration_weeks = 4
+
+# ---------------------------------------------------------
 # REPORT OUTPUT & SPATIAL ENGINE
 # ---------------------------------------------------------
 with right_panel:
@@ -315,6 +348,7 @@ with right_panel:
     ])
 
     if run_audit_btn:
+        # Template with strictly mapped static keys (safe from f-string compilation curly-brace mismatch)
         raw_template = """
 ### 🏛️ 360° Forensic Audit: [ADDRESS]
 *Generated: [DATE]*
@@ -322,12 +356,12 @@ with right_panel:
 ---
 
 ### EXECUTIVE SUMMARY:
-The property at **[ADDRESS]** represents an excellent target matching your maximum budget of **EUR [MAX_BUDGET]**. 
-Due to your required Capital Works Reserve requirements of **EUR [COST_LOW] – EUR [COST_HIGH]**, your absolute walk-away bidding limit is calculated at **EUR [WALKAWAY]** to preserve structural cash cushions.
+Elena and Matteo, this property is a target matching your max budget parameters of **EUR [MAX_BUDGET]**. 
+Based on your custom Capital Works Reserve requirements of **EUR [COST_LOW] – EUR [COST_HIGH]** to execute your structural renovations, your absolute walk-away bidding limit is calculated at **EUR [WALKAWAY]**.
 
 ---
 
-### SECTION 1: MICRO-MARKET CMA & VALUATIONS
+### SECTION 1: MICRO-MARKET CMA, STREET TRENDS & VALUATIONS
 
 | BER Performance Tier | Average Price / m² | Target Property Alignment |
 |---|---|---|
@@ -339,26 +373,32 @@ Due to your required Capital Works Reserve requirements of **EUR [COST_LOW] – 
 | Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability |
 |---|---|---|---|---|---|---|---|---|
 | **[ADDRESS]** | **[STREET]** | **Live** | **€[ASKING]** | **[SIZE] m²** | **[BER]** | **[TYPOLOGY]** | **€[RATE]/m²** | **Target Property** |
-| Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | [TYPOLOGY] | €6,927/m² | Near target baseline |
+| Comp 1 | Adjacent Street | 2026-02 | €665,000 | 96 m² | D2 | [TYPOLOGY] | €6,927/m² | Near target baseline |
 | Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | [TYPOLOGY] | €5,948/m² | Unmodernised comp |
 
 #### Valuation & Acquisition Boundaries
-* **Fair Market Value (FMV):** €[FMV]
+* **Estimated Fair Market Value (FMV):** €[FMV]
 * **Recommended Opening Bid:** €[OPEN_BID] (Asking + 5%)
 * **Strict Walk-Away Limit:** €[WALKAWAY] (FMV minus Capital Works Reserves)
+* **Street Trend Metric:** The street median baseline stands at **€612,000**. The listing's asking price of **€[ASKING]** represents a deliberate underquote designed to spark a bidding war.
 
 ---
 
-### SECTION 2: BEDROOM SIZE AUDIT (SCSI STANDARDS)
+### SECTION 2: SPATIAL FABRIC & BEDROOM SIZE AUDIT (SCSI STANDARDS)
 * **Bedroom 1:** [B1_W]m x [B1_L]m = **[B1_A] m²** ([B1_F])
 * **Bedroom 2:** [B2_W]m x [B2_L]m = **[B2_A] m²** ([B2_F])
 * **Bedroom 3:** [B3_W]m x [B3_L]m = **[B3_A] m²** ([B3_F])
 
 *Note: Under standard SCSI protocols, any room under 7.0 m² cannot be marketed as a bedroom.*
+* **Downstairs Guest WC:** [GUEST_WC]
 
 ---
 
-### SECTION 3: ROAD TO B3 & A RATING ROADMAPS
+### SECTION 3: ERA-SPECIFIC FABRIC, RETROFIT PATHWAYS & COSTING
+
+* **Era Construction Profile:** [ERA]
+* **Contractor Works Timeline:** [WEEKS_TIMELINE] Weeks.
+* **Habitability Index:** **[HABITABLE_STATUS]**
 
 #### 🟢 The Road to B3 (Green Mortgage Rate Eligibility)
 * **Attic Insulation:** Gross €2,500 | SEAI Grant: €1,500 | **Net: €1,000**
@@ -372,9 +412,10 @@ Due to your required Capital Works Reserve requirements of **EUR [COST_LOW] – 
 
 ---
 
-### SECTION 4: HAZARDS & SURVEY SCAN
-* **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones.
-* **Planning Precedents:** Neighbors on the adjacent street successfully secured dormer and extension retention permissions.
+### SECTION 4: ENVIRONMENTAL & CONVEYANCING RISK RADAR
+* **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones. No flood insurance exclusions.
+* **Title Check:** Verify Freehold status. Ensure that any attic conversion is certified as storage rather than habitable space.
+* **DLRCC / DCC Planning Precedent:** High approval rate for rear extensions under 40 m² and attic conversions on adjacent plots.
 """
         # Safely execute value mapping
         report = raw_template.replace("[ADDRESS]", address_input)
@@ -394,90 +435,4 @@ Due to your required Capital Works Reserve requirements of **EUR [COST_LOW] – 
         report = report.replace("[B1_W]", f"{b1_w:.1f}").replace("[B1_L]", f"{b1_l:.1f}").replace("[B1_A]", f"{b1_area:.2f}").replace("[B1_F]", b1_flag)
         report = report.replace("[B2_W]", f"{b2_w:.1f}").replace("[B2_L]", f"{b2_l:.1f}").replace("[B2_A]", f"{b2_area:.2f}").replace("[B2_F]", b2_flag)
         report = report.replace("[B3_W]", f"{b3_w:.1f}").replace("[B3_L]", f"{b3_l:.1f}").replace("[B3_A]", f"{b3_area:.2f}").replace("[B3_F]", b3_flag)
-        
-        st.session_state.audit_report = report
-
-    with tab_report:
-        if st.session_state.audit_report:
-            st.markdown("### Executive Valuation Summary")
-            st.markdown(f"**Extracted Address:** {address_input}  \n**Current Asking Price:** €{asking_price:,}  \n**Target Floorplate:** {size_sqm} m²")
-            st.markdown("---")
-            st.markdown("### Micro-Market CMA & Valuations")
-            st.markdown(f"| Property Address | Asking Price | Floorplate | BER | Situation |  \n|---|---|---|---|---|  \n| **{address_input}** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** |")
-            st.markdown(f"- **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}  \n- **Recommended Opening Bid:** €{opening_bid:,.0f}  \n- **Strict Walk-Away Limit:** €{walkaway_ceiling:,.0f}")
-        else:
-            st.info("👈 Click 'Run 360° Forensic Audit' to generate report data.")
-            
-    with tab_retrofit:
-        if st.session_state.audit_report:
-            st.markdown("### Bedroom Sizes Audit (SCSI Thresholds)")
-            st.markdown(f"* **Bedroom 1:** {b1_w}m x {b1_l}m = **{b1_area:.2f} m²** ({b1_flag})  \n* **Bedroom 2:** {b2_w}m x {b2_l}m = **{b2_area:.2f} m²** ({b2_flag})  \n* **Bedroom 3:** {b3_w}m x {b3_l}m = **{b3_area:.2f} m²** ({b3_flag})")
-            st.markdown("---")
-            st.markdown("### Thermodynamic Retrofit Costing (SEAI Pathways)")
-            st.markdown("#### 🟢 Road to B3 (Green Mortgage Eligibility)  \n- **Total Gross Cost:** €4,300  \n- **Total SEAI Grants:** €2,200  \n- **Net Cash Required:** **€2,110**  \n\n#### 🔵 Road to A-Rating (Decarbonized Asset)  \n- **Total Gross Cost:** €34,000  \n- **Total SEAI Grants:** €12,500  \n- **Net Cash Required:** **€21,500**")
-            
-    with tab_hazards:
-        if st.session_state.audit_report:
-            st.markdown("### Environmental & Conveyancing Risk Radar")
-            st.markdown("* **OPW Flooding Extent:** Located outside predicted 1-in-100 year fluvial envelopes.  \n* **Title Check:** Verify Freehold status. Ensure that any attic conversion is certified as storage rather than habitable space.  \n* **DLRCC / DCC Planning Precedent:** High approval rate for rear extensions under 40 m² and attic conversions on adjacent plots.")
-            
-    with tab_verdict:
-        if st.session_state.audit_report:
-            st.markdown("### Final Acquisition Verdict")
-            st.success("💎 **STRONG BUY** (Pending structural engineer verification of boundaries)")
-            st.markdown("---")
-            st.markdown("### 📥 Export Executive Report")
-            c_dl1, c_dl2 = st.columns(2)
-            
-            c_dl1.download_button(
-                label="📥 Download Markdown Version",
-                data=st.session_state.audit_report,
-                file_name="Forensic_Audit_Report.md",
-                mime="text/markdown"
-            )
-            
-            if FPDF:
-                pdf_data = generate_pdf_bytes(st.session_state.audit_report, address_input)
-                c_dl2.download_button(
-                    label="📕 Download Structured PDF Version",
-                    data=pdf_data,
-                    file_name="Forensic_Audit_Report.pdf",
-                    mime="application/pdf"
-                )
-                
-    with tab_map:
-        st.subheader("🗺️ Dynamic GIS Spatial Hazards & Planning Precedents")
-        if folium:
-            m = folium.Map(location=[map_lat, map_lon], zoom_start=16)
-            
-            folium.Marker(
-                [map_lat, map_lon],
-                popup="🎯 <b>" + address_input + "</b>",
-                tooltip="Target Baseline",
-                icon=folium.Icon(color="red", icon="home")
-            ).add_to(m)
-            
-            if is_d08:
-                folium.Circle(
-                    location=[53.3415, -6.3160],
-                    radius=180,
-                    color="blue",
-                    fill=True,
-                    fill_color="blue",
-                    fill_opacity=0.35,
-                    popup="🔴 <b>OPW Fluvial Flood Risk: River Camac Catchment</b>"
-                ).add_to(m)
-            elif is_d14:
-                folium.Circle(
-                    location=[53.2970, -6.2480],
-                    radius=200,
-                    color="blue",
-                    fill=True,
-                    fill_color="blue",
-                    fill_opacity=0.3,
-                    popup="⚠️ <b>OPW Flood Risk: River Dodder Catchment</b>"
-                ).add_to(m)
-                
-            st_folium(m, width=650, height=450)
-        else:
-            st.info("Folium GIS library not installed.")
+        report = report.replace("[GUEST_WC]", "Present and c
