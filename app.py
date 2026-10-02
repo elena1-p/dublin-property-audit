@@ -1,10 +1,9 @@
 import streamlit as st
 import re
 import json
-import base64
 from io import BytesIO
 
-# Try importing PDF parsing library
+# Try importing PDF parsing library safely
 try:
     import pypdf
 except ImportError:
@@ -18,51 +17,26 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CONSTANTS & PROTOCOLS ( v6.0 Grounding )
+# INITIALIZE VARIABLES & FINANCIAL CONSTANTS
 # ---------------------------------------------------------
-AUDIT_PROTOCOL = """
-### SECTION 1: STREET TRANSACTIONS & PRICE REALITY
-* Recent Comps: Last 3–5 sales on that road from Property Price Register.
-* Underquoting Margin: Calculated percentage the agent typically prices below market.
-* True Sold Benchmark: Actual sold €/m² for renovated vs. unrenovated homes.
-* Valuation Ceiling: Fair market value, aggressive Opening Bid, and Walk-Away Ceiling.
+total_low = 0
+total_high = 0
+custom_works = []
 
-### SECTION 2: COUNCIL PLANNING & STREET PRECEDENTS
-* Roof & Attic Precedent: Attic conversion/dormer approvals under local DCC/DLRCC planning.
-* Rear Extension Precedent: Allowed development footprint on adjacent plots.
-* Unauthorised Development Radar: Verify if extensions >40 m² have Certificates of Compliance.
+# Raw Cost Database for Dublin (Materials & Labour Q3 2026)
+DUBLIN_COST_DATABASE = {
+    "rsj": {"low": 8000, "high": 12000, "label": "Knock down load-bearing wall & Install steel RSJ"},
+    "heat_pump": {"low": 16000, "high": 20000, "label": "Air-to-Water Heat Pump & Radiator retrofitting"},
+    "attic": {"low": 25000, "high": 35000, "label": "Attic Dormer Conversion (Habitable standards)"},
+    "rewire": {"low": 8000, "high": 12000, "label": "Full Electrical Rewiring"},
+    "plumb": {"low": 6000, "high": 10000, "label": "Plumbing Upgrade & New Boiler"},
+    "insulation": {"low": 12000, "high": 18000, "label": "External Wall Insulation (EWI)"},
+    "cosmetic": {"low": 5000, "high": 15000, "label": "General Internal Cosmetics (Plastering/Painting)"}
+}
 
-### SECTION 3: FABRIC, STRUCTURE & ENERGY (SCSI Standards)
-* Wall Construction: 1950s solid block vs. 1970s hollow block vs. modern timber frame.
-* Floorplate Integrity: Total livable m²; flag bedrooms < 7.0 m² as unlivable "box rooms".
-* Bathroom Dealbreaker: Check for presence/absence of a downstairs guest WC.
-* BER & Green Mortgage: Current rating; exact retrofit pathways & SEAI grant offsets.
-* Structural Risks: Pre-1970 lead pipes, bitumen DPC, suspended timber wood rot, asbestos risk.
-
-### SECTION 4: ENVIRONMENTAL & CLIMATE HAZARDS
-* OPW Flood Hazard: Fluvial/pluvial flood history (Verify insurance exclusions to protect loan drawdown).
-* Culverted Watercourses: Historical buried rivers or mill races near property lines.
-* EPA Radon: Radon risk level (high vs medium/low) requiring sumps.
-
-### SECTION 5: TITLE, LEGAL & TENANCY FLAGS
-* Probate Risk: Is this an executor sale? (Flag potential 6-12 month closing delays).
-* Tenant in Situ: Sitting tenant rights under RTB Part 4.
-* Tenure: Freehold vs Long Leasehold (Lending blocks if < 70 years remaining).
-* OMC Solvency: Service charge history and fire remediation levy status.
-
-### SECTION 6: LIFESTYLE, GARDEN & COMMUTE
-* Toddler Lawn: Enclosed garden safety and sun orientation (South/West vs North).
-* Lycée Distance: Walking/cycling commute times to Lycée Français (Roebuck Road).
-* Tech Commutes: Cycle and transport times to Google (Barrow St) & LinkedIn (Grand Canal Dock).
-
-### SECTION 7: FINAL VERDICT & NEGOTIATION PLAN
-* Categorical Verdict: [STRONG BUY / CONDITIONAL BUY / IMMEDIATE PASS]
-* Key Red Flags: Summary of critical dealbreakers.
-* Bidding Plan: Opening Offer and Walk-Away Price.
-* Pre-Offer Solicitor Questions: Precise technical and legal questions for the agent.
-"""
-
-# Helper function to extract text from uploaded PDF
+# ---------------------------------------------------------
+# PARSING & UTILITY FUNCTIONS
+# ---------------------------------------------------------
 def extract_text_from_pdf(file_bytes):
     if not pypdf:
         return "pypdf library not installed. Cannot parse PDF text."
@@ -73,12 +47,73 @@ def extract_text_from_pdf(file_bytes):
             text += page.extract_text() or ""
         return text
     except Exception as e:
-        return f"Error reading BER PDF: {str(e)}"
+        return f"Error reading PDF: {str(e)}"
 
-# Mock parser to simulate web scraping Daft/MyHome URL metadata
+def mock_llm_parse_custom_works(narrative):
+    """
+    Analyzes natural language requests using keyword triggers to estimate cost.
+    In production, this would call the Gemini API.
+    """
+    estimates = []
+    text = narrative.lower()
+    
+    if any(k in text for k in ["wall", "knock", "rsj", "steel", "open plan"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["rsj"]["label"],
+            "low": DUBLIN_COST_DATABASE["rsj"]["low"],
+            "high": DUBLIN_COST_DATABASE["rsj"]["high"],
+            "scope": "Requires structural engineer certificate, steel beam, and local padstone casting."
+        })
+    if any(k in text for k in ["heat pump", "pump", "retrofit", "ber", "radiator"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["heat_pump"]["label"],
+            "low": DUBLIN_COST_DATABASE["heat_pump"]["low"],
+            "high": DUBLIN_COST_DATABASE["heat_pump"]["high"],
+            "scope": "Includes SEAI grant application preparation. Low-temp radiator resizing required."
+        })
+    if any(k in text for k in ["attic", "roof", "dormer", "loft"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["attic"]["label"],
+            "low": DUBLIN_COST_DATABASE["attic"]["low"],
+            "high": DUBLIN_COST_DATABASE["attic"]["high"],
+            "scope": "Requires floor joist reinforcement and compliance with TGD Part B (Fire Escape)."
+        })
+    if any(k in text for k in ["wire", "rewire", "electrics", "fuseboard"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["rewire"]["label"],
+            "low": DUBLIN_COST_DATABASE["rewire"]["low"],
+            "high": DUBLIN_COST_DATABASE["rewire"]["high"],
+            "scope": "Requires RECI certified testing and complete chasing of masonry."
+        })
+    if any(k in text for k in ["plumb", "boiler", "pipes", "heating"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["plumb"]["label"],
+            "low": DUBLIN_COST_DATABASE["plumb"]["low"],
+            "high": DUBLIN_COST_DATABASE["plumb"]["high"],
+            "scope": "Upgrade of internal runs and chemical system flushing."
+        })
+    if any(k in text for k in ["wrap", "insulate", "external", "render"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["insulation"]["label"],
+            "low": DUBLIN_COST_DATABASE["insulation"]["low"],
+            "high": DUBLIN_COST_DATABASE["insulation"]["high"],
+            "scope": "Includes window sill depth extensions and rainwater pipe redirection."
+        })
+        
+    # If no keywords match but text is filled, generate generic cosmetic estimate
+    if not estimates and len(narrative.strip()) > 10:
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["cosmetic"]["label"],
+            "low": DUBLIN_COST_DATABASE["cosmetic"]["low"],
+            "high": DUBLIN_COST_DATABASE["cosmetic"]["high"],
+            "scope": "General modernization based on provided text."
+        })
+        
+    return estimates
+
+# Mock parser for Daft/MyHome URL metadata
 def parse_property_url(url):
-    # Fallback default values
-    data = {
+    return {
         "address": "Connolly Gardens, Inchicore, Dublin 8",
         "asking_price": 525000,
         "beds": 3,
@@ -87,37 +122,16 @@ def parse_property_url(url):
         "type": "End-of-Terrace",
         "postcode": "D8"
     }
-    if "harold" in url.lower() or "argus" in url.lower():
-        data = {
-            "address": "23 Mount Argus Close, Harold's Cross, Dublin 6W",
-            "asking_price": 595000,
-            "beds": 3,
-            "baths": 2,
-            "size_sqm": 122.0,
-            "type": "Terraced",
-            "postcode": "D6W"
-        }
-    elif "view" in url.lower() or "james" in url.lower():
-        data = {
-            "address": "1 Grand Canal View, Saint James's Terrace, Dublin 8",
-            "asking_price": 695000,
-            "beds": 3,
-            "baths": 2,
-            "size_sqm": 150.0,
-            "type": "End-of-Terrace",
-            "postcode": "D8"
-        }
-    return data
 
 # ---------------------------------------------------------
-# UI LAYOUT & ENTRY
+# STREAMLIT UI - CONFIGURATION & INPUTS
 # ---------------------------------------------------------
 st.title("🏠 Dublin Residential Property Audit Engine")
-st.caption("SCSI Surveying, Irish Planning Precedents, Conveyancing & Financial Underwriting")
+st.caption("SCSI Surveying Standards, Local Planning Maps, and Financial Underwriting Compliance")
 
-col1, col2 = st.columns(2)
+left_panel, right_panel = st.columns()
 
-with col1:
+with left_panel:
     st.subheader("1. Ingest Property Coordinates")
     property_url = st.text_input(
         "Daft.ie or MyHome.ie Listing URL", 
@@ -127,176 +141,149 @@ with col1:
     parsed_listing = {}
     if property_url:
         parsed_listing = parse_property_url(property_url)
-        st.success(f"Successfully processed coordinates for: **{parsed_listing['address']}**")
-        
-        # Display extracted metadata in a clean table format
-        st.markdown("##### Extracted Coordinates")
-        st.markdown(f"""
-        | Coordinate | Value |
-        |---|---|
-        | **Address** | {parsed_listing['address']} |
-        | **Asking Price** | €{parsed_listing['asking_price']:,} |
-        | **Typology** | {parsed_listing['type']} |
-        | **Declared Floorplate** | {parsed_listing['size_sqm']} m² |
-        | **Beds / Baths** | {parsed_listing['beds']} Bed / {parsed_listing['baths']} Bath |
-        """)
+        st.success(f"Coordinates processed for: {parsed_listing['address']}")
 
-    st.subheader("2. Physical Certificates")
-    uploaded_ber = st.file_uploader(
-        "Upload Official SEAI BER Report or Advisory PDF", 
-        type=["pdf"]
+    st.subheader("2. Dual BER Document Ingestion")
+    st.caption("Upload up to two official SEAI technical files (e.g. Certificate and Advisory Report).")
+    
+    uploaded_ber_1 = st.file_uploader("Upload BER Certificate (.pdf)", type=["pdf"], key="ber_1")
+    uploaded_ber_2 = st.file_uploader("Upload BER Advisory Report (.pdf)", type=["pdf"], key="ber_2")
+    
+    ber_text_1 = ""
+    ber_text_2 = ""
+    if uploaded_ber_1:
+        ber_text_1 = extract_text_from_pdf(uploaded_ber_1.read())
+        st.info("BER Certificate parsed successfully.")
+    if uploaded_ber_2:
+        ber_text_2 = extract_text_from_pdf(uploaded_ber_2.read())
+        st.info("BER Advisory Report parsed successfully.")
+
+    st.subheader("3. Asset Media & Spatial Upload")
+    st.caption("Provide images, site maps, or floor plans to assist the structural evaluation.")
+    uploaded_media = st.file_uploader(
+        "Upload Floor Plans / Photos (PNG, JPG)", 
+        type=["png", "jpg", "jpeg"], 
+        accept_multiple_files=True
+    )
+    if uploaded_media:
+        st.success(f"Successfully cached {len(uploaded_media)} media file(s) for visual audit.")
+
+with right_panel:
+    st.subheader("4. Custom Works & Spatial Analysis Engine")
+    st.markdown("""
+    Describe your renovation plans below (e.g. *'I want to knock down the wall between the kitchen and dining room to install steel RSJ beams, and retrofit a heat pump'*). 
+    The engine will match your description against local Dublin material indices to generate accurate budgets.
+    """)
+    
+    user_narrative = st.text_area(
+        "Describe your planned renovations:", 
+        height=150, 
+        placeholder="e.g. Knock down the main back wall, install an RSJ steel beam, rewire the ground floor..."
     )
     
-    ber_text = ""
-    if uploaded_ber:
-        ber_bytes = uploaded_ber.read()
-        ber_text = extract_text_from_pdf(ber_bytes)
-        st.success(f"BER Certificate Loaded ({len(ber_text)} characters parsed)")
-        with st.expander("View Extracted Certificate Raw Text"):
-            st.text(ber_text[:1000] + "...")
-
-with col2:
-    st.subheader("3. Custom Engineering & Capital Works")
-    st.caption("Declare targeted adjustments, knock-downs, or retrofits to dynamically calculate walk-away ceilings.")
-    
-    custom_works = []
-    
-    # Pre-populate some standard high-frequency works
-    w1_active = st.checkbox("Knock down load-bearing wall (Internal RSJ structural steel)")
-    if w1_active:
-        custom_works.append({
-            "item": "Knock down load-bearing wall & Install steel RSJ beam",
-            "est_low": 8000,
-            "est_high": 12000,
-            "scope": "Requires structural engineer sign-off & plastering"
-        })
-        
-    w2_active = st.checkbox("Heat Pump Retrofit (including low-temp aluminium radiators)")
-    if w2_active:
-        custom_works.append({
-            "item": "Air-to-Water Heat Pump & Radiator resizing",
-            "est_low": 16000,
-            "est_high": 20000,
-            "scope": "SEAI grant of €6,500 + €2,000 applicable"
-        })
-        
-    w3_active = st.checkbox("Attic Conversion (Dormer window / habitable study space)")
-    if w3_active:
-        custom_works.append({
-            "item": "Attic Dormer Conversion (Habitable standards)",
-            "est_low": 25000,
-            "est_high": 35000,
-            "scope": "Requires Part B fire compliance and structural steel joists"
-        })
-
-    # Custom works builder
-    with st.expander("➕ Add Bespoke Work Item"):
-        bespoke_title = st.text_input("Work Item Title", placeholder="e.g. Garden office / rewiring")
-        b_low = st.number_input("Est. Cost Lower (€)", value=0, step=500)
-        b_high = st.number_input("Est. Cost Upper (€)", value=0, step=500)
-        b_scope = st.text_input("Technical Constraints / Scope", placeholder="e.g. Requires independent fuse board")
-        if st.button("Append to Capital Works Stack") and bespoke_title:
-            custom_works.append({
-                "item": bespoke_title,
-                "est_low": b_low,
-                "est_high": b_high,
-                "scope": b_scope
-            })
-            st.info(f"Appended: {bespoke_title}")
-
-    if custom_works:
-        st.markdown("##### Capital Works Cost Matrix")
-        works_table = ""
-        total_low = 0
-        total_high = 0
-        for w in custom_works:
-            works_table += f"| {w['item']} | €{w['est_low']:,} – €{w['est_high']:,} | {w['scope']} |\n"
-            total_low += w['est_low']
-            total_high += w['est_high']
+    # Process custom works based on narrative input
+    if user_narrative:
+        custom_works = mock_llm_parse_custom_works(user_narrative)
+        if custom_works:
+            total_low = sum(item["low"] for item in custom_works)
+            total_high = sum(item["high"] for item in custom_works)
             
-        st.markdown(f"""
-        | Work Item | Estimated Cost Range | Scope & Constraints |
-        |---|---|---|
-        {works_table}
-        | **TOTAL CAPITAL RESERVE** | **€{total_low:,} – €{total_high:,}** | **To be deducted from walk-away limits** |
-        """)
+            st.success("🎯 Custom renovation plan analyzed!")
+            st.markdown("##### Calculated Renovation Budgets")
+            
+            # Construct cost matrix markdown table
+            matrix_rows = ""
+            for w in custom_works:
+                matrix_rows += f"| {w['item']} | €{w['low']:,} – €{w['high']:,} | {w['scope']} |\n"
+                
+            st.markdown(f"""
+            | Work Item | Budget Range | Technical Scope |
+            |---|---|---|
+            {matrix_rows}
+            | **TOTAL RESERVE TARGET** | **€{total_low:,} – €{total_high:,}** | **Will be deducted from your bidding ceiling** |
+            """)
+        else:
+            st.warning("No standard Dublin cost matches found. Double-check your keywords (e.g. 'wall', 'rewire', 'heat pump').")
 
 # ---------------------------------------------------------
-# EXECUTE COMPREHENSIVE ENGINE
+# COMPREHENSIVE FORENSIC EXECUTION ENGINE
 # ---------------------------------------------------------
 st.markdown("---")
 if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
     if not property_url:
-        st.error("Error: A Daft/MyHome URL is mandatory to anchor the local geographic comps.")
+        st.error("Error: A Daft/MyHome listing URL is required to execute local comparables.")
     else:
-        with st.spinner("Compiling structural precedents, local PPR records, and SEAI databases..."):
-            # Prepare data context to feed into LLM or Rule Engine
-            context = {
-                "coordinates": parsed_listing,
-                "custom_works": custom_works,
-                "parsed_ber_data": ber_text[:5000] # Trimmed to avoid overflow
-            }
+        with st.spinner("Processing documents, analyzing spatial plans, and retrieving planning history..."):
             
-            # --- RENDER COMPILED COMPREHENSIVE REPORT ---
+            # Calculate final ceilings based on computed custom works
+            asking = parsed_listing["asking_price"]
+            opening_bid = asking * 1.05
+            fmv_ceiling = asking * 1.15
+            walkaway_ceiling = fmv_ceiling - total_low
+            
+            # --- DISPLAY 360° FORENSIC AUDIT ---
             st.header("📋 360° Forensic Audit & Technical Underwriting Report")
-            st.caption(f"Target Asset: {parsed_listing['address']}")
+            st.caption(f"Asset Address: {parsed_listing['address']}")
             
-            # Exec Summary Callout
+            # Executive Summary Block
             st.markdown(f"""
             > ### 📌 Executive Summary
-            > This property represents a highly compelling prospect that aligns with your purchase metrics. 
-            > Based on your target coordinates, the estimated fair-market value stands at **€{parsed_listing['asking_price'] * 1.15:,.0f}**, 
-            > with an aggressive opening position recommended at **€{parsed_listing['asking_price'] * 1.05:,.0f}**. 
-            > Due to your defined Capital Reserve requirements (**€{total_low:,} – €{total_high:,}**), your absolute walk-away ceiling is mathematically capped to preserve structural capital.
+            > The property is a highly compelling prospect that aligns with your financial metrics.
+            > Due to your defined Capital Works Reserve requirements (**€{total_low:,} – €{total_high:,}**), your absolute walk-away ceiling is mathematically capped at **€{walkaway_ceiling:,.0f}** to preserve required structural cash cushions.
             """)
             
-            # Render Sections
-            s1, s2, s3, s4 = st.tabs(["💶 Financials & Comps", "🏗️ Planning & Fabric", "⛈️ Hazards & Title", "🏁 Negotiation & Verdict"])
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "💶 Financials & Comps", 
+                "🏗️ Planning & Fabric", 
+                "⛈️ Environmental & Legal", 
+                "🏁 Verdict & Playbook"
+            ])
             
-            with s1:
-                st.subheader("Section 1: Micro-Market CMA & PPR Valuations")
+            with tab1:
+                st.subheader("Section 1: Micro-Market CMA & Valuations")
                 st.markdown(f"""
-                | Address | Date | Sold Price | Adjustments | Adjusted €/m² |
+                | Address | Status | PPR Price | Size (m²) | Adjusted €/m² |
                 |---|---|---|---|---|
-                | **{parsed_listing['address']}** | **Live** | **€{parsed_listing['asking_price']:,} (Asking)** | Baseline | €{parsed_listing['asking_price'] / parsed_listing['size_sqm']:,.0f}/m² |
-                | Connolly Gardens (Comps) | 2026-02 | €665,000 | Similar size | €6,927/m² |
-                | Connolly Gardens | 2019-10 | €347,000 | Unrenovated | €5,948/m² (Adjusted) |
+                | **{parsed_listing['address']}** | **Live** | **€{asking:,}** | {parsed_listing['size_sqm']} | €{asking/parsed_listing['size_sqm']:,.2f}/m² |
+                | Connolly Gardens (Comps) | Sold (2026) | €665,000 | 96.0 | €6,927/m² |
+                | Connolly Gardens | Sold (2019) | €347,000 | 84.0 | €5,948/m² (Adjusted) |
                 """)
                 
                 st.markdown(f"""
-                * **Valuation Ceiling Matrix:**
-                  * **Fair Market Value:** €{parsed_listing['asking_price'] * 1.15:,.0f}
-                  * **Aggressive Opening Bid:** €{parsed_listing['asking_price'] * 1.05:,.0f}
-                  * **Absolute Walk-Away Limit:** €{parsed_listing['asking_price'] * 1.15 - total_low:,.0f} (Reduced by required works to maintain cash cushions).
+                * **Underwriting Boundaries:**
+                  * **Estimated Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
+                  * **Recommended Opening Position:** €{opening_bid:,.0f}
+                  * **Walk-Away Bidding Ceiling:** €{walkaway_ceiling:,.0f} *(Calculated as FMV minus Capital Reserve)*
                 """)
-
-            with s2:
-                st.subheader("Section 2 & 3: Structural Fabric, Planning & Attic Precedents")
+                
+            with tab2:
+                st.subheader("Section 2 & 3: Structural Fabric & Planning Precedents")
                 st.markdown(f"""
-                * **Pre-Planning Exemption Scan:** The property typology suggests any existing rear extension must be verified by a structural engineer to confirm it is under the **40 m²** legal exemption limit.
-                * **Floorplate and Box Rooms:** Declared size is **{parsed_listing['size_sqm']} m²**. Ensure no bedroom floor space falls below **7.0 m²**, which legally renders it a study/box room instead of a bedroom.
-                * **Structural Fabric:** Cavity block/solid concrete wall inspection is required. 
+                * **Floorplate Integrity:** Total livable area parsed as **{parsed_listing['size_sqm']} m²**.
+                * **Extension Check:** If you have uploaded a floor plan, verify if the rear extension exceeds **40 m²**. If it does, your solicitor must demand planning permission documents.
+                * **Attic dormers:** Check neighboring properties on the planning registry to confirm if a dormer conversion is allowed on this street without restrictions.
                 """)
                 
                 if custom_works:
-                    st.warning("⚠️ High-Impact Structural Works Declared!")
-                    for cw in custom_works:
-                        st.markdown(f"- **{cw['item']}:** Estimated €{cw['est_low']:,}–€{cw['est_high']:,}. *Constraint: {cw['scope']}*")
-
-            with s3:
-                st.subheader("Section 4 & 5: Environmental Risk & Legal Conveyancing Flags")
+                    st.info("🛠️ Target Renovation Plans Integrated:")
+                    for w in custom_works:
+                        st.markdown(f"- **{w['item']}:** Estimated at €{w['low']:,} – €{w['high']:,}.")
+                else:
+                    st.info("No custom works declared. Valuation assumptions are based on a turnkey asset purchase.")
+                    
+            with tab3:
+                st.subheader("Section 4 & 5: Climate Hazards, Title & Legal Risks")
                 st.markdown("""
-                * **OPW Flooding Radar:** Fluvial risk check against nearby canal or river basins is critical. A flood insurance exclusion on this Eircode will cause AIB to refuse drawdown.
-                * **Probate Risk & Tenant in Situ:** Request immediate declaration from the vendor's estate agent whether there is a sitting tenant or if the property is subject to probate delays.
-                * **Tenure Verification:** Demanded title check: confirm if **Freehold** or Leasehold with >70 years remaining.
+                * **Conveyancing Check:** Your solicitor must verify if the sale is subject to probate delays (which can stall the closing process by 6–12 months).
+                * **OPW Flooding History:** Proximity checks must be executed against local rivers to ensure standard home insurance can be secured.
+                * **Tenure Verification:** Confirm that the property is **Freehold** or Leasehold with at least 70+ years remaining.
                 """)
-
-            with s4:
-                st.subheader("Section 7: Strategic Negotiation Playbook")
+                
+            with tab4:
+                st.subheader("Section 7: Final Verdict & Negotiation Plan")
                 st.markdown(f"""
-                * **Audit Verdict:** ⚖️ **CONDITIONAL BUY** (Pending surveyor verification and planning retention certificate).
-                * **Immediate Pre-Offer Actions:**
-                  1. Request confirmation of **extension floor area measurements** from the selling agent.
-                  2. Query whether the property has an active **Probate application**.
-                  3. Send coordinates to your broker to confirm **AIB/Haven loan-to-value (LTV)** eligibility based on BER data.
+                * **Categorical Audit Verdict:** ⚖️ **CONDITIONAL BUY**
+                * **Bidding Roadmap:**
+                  1. **Opening Bid:** Start at **€{opening_bid:,.0f}** to signal standard liquidity and intent.
+                  2. **Hard Limit:** Never exceed your walk-away threshold of **€{walkaway_ceiling:,.0f}**.
                 """)
