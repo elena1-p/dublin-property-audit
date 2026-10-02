@@ -106,6 +106,9 @@ def parse_dublin_url(url):
     }
 
 def clean_pdf_text(text):
+    """
+    Strict clean-filtration mapping of all non-Latin-1 characters to prevent FPDF crash.
+    """
     replacements = {
         "€": "EUR ", "²": " sqm", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*",
         "🏡": "", "📊": "", "📋": "", "👁️": "", "📄": "", "🎯": "", "🏆": "", "🕵️‍♂️": "", "🗺️": "", "🚩": "",
@@ -114,7 +117,10 @@ def clean_pdf_text(text):
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
-    return text
+        
+    # Remove any other remaining non-ascii or non-latin1 characters safely
+    cleaned = text.encode("latin-1", errors="ignore").decode("latin-1")
+    return cleaned
 
 def generate_pdf_bytes(report_text, address):
     if not FPDF:
@@ -126,8 +132,8 @@ def generate_pdf_bytes(report_text, address):
     pdf.set_font("Helvetica", style="B", size=15)
     pdf.cell(0, 10, "360 Forensic Property & Comprehensive Risk Audit", ln=True, align="C")
     pdf.set_font("Helvetica", size=9)
-    pdf.cell(0, 6, f"Property: {address}", ln=True, align="C")
-    pdf.cell(0, 6, f"Report Generated: {datetime.date.today().strftime('%B %d, %Y')}", ln=True, align="C")
+    pdf.cell(0, 6, "Property: " + address.encode("latin-1", "ignore").decode("latin-1"), ln=True, align="C")
+    pdf.cell(0, 6, "Report Generated: " + datetime.date.today().strftime('%B %d, %Y'), ln=True, align="C")
     pdf.ln(8)
     
     cleaned_text = clean_pdf_text(report_text)
@@ -180,7 +186,7 @@ def mock_llm_parse_custom_works(narrative):
 left_panel, right_panel = st.columns(2)
 
 with left_panel:
-    st.subheader("📥 Minimalist Ingestion Panel")
+    st.subheader("1. Ingest Property Coordinates")
     property_url = st.text_input(
         "Daft.ie / MyHome.ie Listing URL", 
         value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-dublin-8/6655188"
@@ -193,22 +199,56 @@ with left_panel:
         parsed_url = parse_dublin_url(property_url)
         extracted_street = parsed_url["street"]
         extracted_postcode = parsed_url["postcode"]
-        st.success(f"Listing Ingested: {parsed_url['address']}")
+        st.success("Listing Ingested: " + parsed_url["address"])
 
-    st.subheader("📄 Official Documents")
-    uploaded_ber_1 = st.file_uploader("Upload BER Certificate (.pdf)", type=["pdf"], key="ber_1")
-    uploaded_ber_2 = st.file_uploader("Upload BER Advisory Report (.pdf)", type=["pdf"], key="ber_2")
+    st.subheader("2. BER Document Ingestion (Combined Slot)")
+    ber_pdfs = st.file_uploader(
+        "Upload SEAI Technical Files (PDFs)", 
+        type=["pdf"], 
+        accept_multiple_files=True,
+        key="multi_ber"
+    )
     
-    ber_text_1 = ""
+    ber_texts = []
     pdf_metrics = {"size": None, "ber": None}
-    if uploaded_ber_1:
-        ber_text_1 = extract_text_from_pdf(uploaded_ber_1.read())
-        pdf_metrics = extract_metrics_from_ber_text(ber_text_1)
-        st.info("BER Certificate parsed successfully.")
+    
+    if ber_pdfs:
+        for idx, pdf in enumerate(ber_pdfs):
+            text = extract_text_from_pdf(pdf.read())
+            ber_texts.append(text)
+            st.info(f"File {idx+1} ({pdf.name}) parsed successfully.")
+            extracted = extract_metrics_from_ber_text(text)
+            if extracted["size"]:
+                pdf_metrics["size"] = extracted["size"]
+            if extracted["ber"]:
+                pdf_metrics["ber"] = extracted["ber"]
+
+    st.subheader("3. Asset Media & Spatial Uploads")
+    media_tab1, media_tab2 = st.tabs(["📁 File Uploader", "📋 Clipboard Paste Area"])
+    
+    uploaded_media = []
+    with media_tab1:
+        uploaded_media = st.file_uploader(
+            "Upload Photos / Plans", 
+            type=["png", "jpg", "jpeg"], 
+            accept_multiple_files=True
+        )
+            
+    with media_tab2:
+        pasted_data = st.text_input("Clipboard Buffer", placeholder="Ctrl+V or drop an image into this window...")
 
     st.subheader("🔧 Spatial & Custom Works")
-    uploaded_media = st.file_uploader("Upload Floorplan / Sketch [Optional]", type=["png", "jpg", "jpeg"])
     user_narrative = st.text_input("Custom Work Description", placeholder="e.g. Knock down wall, install RSJ and heat pump")
+
+    st.subheader("🛌 Bedroom Dimensions Audit")
+    b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
+    b1_l = st.number_input("Bedroom 1 Length (m)", value=4.0, step=0.1)
+    
+    b2_w = st.number_input("Bedroom 2 Width (m)", value=3.0, step=0.1)
+    b2_l = st.number_input("Bedroom 2 Length (m)", value=3.0, step=0.1)
+    
+    b3_w = st.number_input("Bedroom 3 Width (m)", value=2.2, step=0.1)
+    b3_l = st.number_input("Bedroom 3 Length (m)", value=2.7, step=0.1)
 
     st.subheader("💰 Buyer Parameters")
     budget_max = st.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
@@ -226,6 +266,11 @@ with left_panel:
     typology = st.selectbox("Property Typology", ["End-of-Terrace", "Mid-Terrace", "Semi-Detached", "Detached"])
     
     run_audit_btn = st.button("🚀 Run 360° Forensic Audit Protocol (v6.0)", type="primary", use_container_width=True)
+
+# Calculate bedroom areas dynamically
+b1_area = b1_w * b1_l
+b2_area = b2_w * b2_l
+b3_area = b3_w * b3_l
 
 # Process custom works based on narrative input
 if user_narrative:
@@ -256,6 +301,11 @@ with right_panel:
                 fmv_ceiling = asking_price * 1.15
                 walkaway_ceiling = fmv_ceiling - total_low
                 
+                # Check for box rooms (SCSI <7.0 sqm threshold)
+                b1_flag = "Habitable" if b1_area >= 7.0 else "UNLIVABLE BOX ROOM"
+                b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
+                b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
+                
                 # Render Report
                 st.session_state.audit_report = f"""
 ### 🏛️ 360° Forensic Audit: {address_input}
@@ -284,9 +334,23 @@ Due to your required Capital Works Reserve requirements of **€{total_low:,} �
 | Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | {typology} | €6,927/m² | Near target baseline |
 | Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | {typology} | €5,948/m² | Unmodernised comp |
 
+#### Valuation & Acquisition Boundaries
+* **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
+* **Recommended Opening Bid:** €{opening_bid:,.0f} (Asking + 5%)
+* **Strict Walk-Away Limit:** €{walkaway_ceiling:,.0f} (FMV minus Capital Works Reserves)
+
 ---
 
-### SECTION 2: ROAD TO B3 & A RATING ROADMAPS
+### SECTION 2: BEDROOM SIZE AUDIT (SCSI STANDARDS)
+* **Bedroom 1:** {b1_w}m x {b1_l}m = **{b1_area:.2f} m²** ({b1_flag})
+* **Bedroom 2:** {b2_w}m x {b2_l}m = **{b2_area:.2f} m²** ({b2_flag})
+* **Bedroom 3:** {b3_w}m x {b3_l}m = **{b3_area:.2f} m²** ({b3_flag})
+
+*Note: Under standard SCSI protocols, any room under 7.0 m² cannot be marketed as a bedroom.*
+
+---
+
+### SECTION 3: ROAD TO B3 & A RATING ROADMAPS
 
 #### 🟢 The Road to B3 (Green Mortgage Rate Eligibility)
 * **Attic Insulation:** Gross €2,500 | SEAI Grant: €1,500 | **Net: €1,000**
@@ -300,7 +364,7 @@ Due to your required Capital Works Reserve requirements of **€{total_low:,} �
 
 ---
 
-### SECTION 3: HAZARDS & SURVEY SCAN
+### SECTION 4: HAZARDS & SURVEY SCAN
 * **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones.
 * **Planning Precedents:** Neighbors on the adjacent street successfully secured dormer and extension retention permissions.
 """
