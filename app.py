@@ -141,4 +141,4 @@ with col_inputs:
                 st.error(f"Error reading PDF: {e}. Defaulting to manual selection.")
                 
     ber_list = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"]
-    current_ber = st.selectbox("Current BER Rating", ber_list, index=ber_list.index(extracted_be
+    current_ber = st.selectbox("Current BER Rating", ber_list, index=ber_list.index(extracted_ber) if extracted_ber in ber_list else 9)
