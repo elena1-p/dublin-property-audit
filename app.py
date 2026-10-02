@@ -115,7 +115,7 @@ def parse_property_url(url):
 st.title("🏠 Dublin Residential Property Audit Engine")
 st.caption("SCSI Surveying, Irish Planning Precedents, Conveyancing & Financial Underwriting")
 
-col1, col2 = st.columns()
+col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. Ingest Property Coordinates")
