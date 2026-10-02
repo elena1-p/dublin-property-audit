@@ -28,6 +28,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# Initialize Session State Report Container
+if "audit_report" not in st.session_state:
+    st.session_state.audit_report = ""
+
 # ---------------------------------------------------------
 # INITIALIZE GLOBAL AUDIT STATE
 # ---------------------------------------------------------
@@ -107,7 +111,8 @@ def parse_dublin_url(url):
 
 def clean_pdf_text(text):
     """
-    Strict clean-filtration mapping of all non-Latin-1 characters to prevent FPDF crash.
+    Cleans raw markdown structures, table formatting, and non-Latin-1 characters 
+    to prevent FPDF layout wrapping loop errors.
     """
     replacements = {
         "€": "EUR ", "²": " sqm", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*",
@@ -118,7 +123,11 @@ def clean_pdf_text(text):
     for k, v in replacements.items():
         text = text.replace(k, v)
         
-    # Remove any other remaining non-ascii or non-latin1 characters safely
+    # FIX: Explicitly remove markdown table divider markers to prevent narrow-cell FPDF wrap loops
+    text = re.sub(r"\|[-:| ]+\|", "", text)
+    text = text.replace("|", "  ")
+    
+    # Strip any characters outside Latin-1 encoding safely
     cleaned = text.encode("latin-1", errors="ignore").decode("latin-1")
     return cleaned
 
@@ -280,12 +289,30 @@ if user_narrative:
         total_high = sum(item["high"] for item in custom_works)
 
 # ---------------------------------------------------------
-# REPORT OUTPUT & SPATIAL ENGINE
+# CALCULATE BID ROADS & ACQUISITION BOUNDARIES
+# ---------------------------------------------------------
+opening_bid = asking_price * 1.05
+fmv_ceiling = asking_price * 1.15
+walkaway_ceiling = fmv_ceiling - total_low
+
+b1_flag = "Habitable" if b1_area >= 7.0 else "UNLIVABLE BOX ROOM"
+b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
+b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
+
+# ---------------------------------------------------------
+# REPORT OUTPUT & SPATIAL ENGINE (MULTI-TAB RESTORED)
 # ---------------------------------------------------------
 with right_panel:
     st.subheader("📋 Forensic Audit & Strategic Acquisition Report")
     
-    tab_report, tab_map = st.tabs(["📄 Full Audit Report", "🗺️ Spatial & Planning Map"])
+    # FIX: Explicitly configured output tabs to restore previous tabbed layout
+    tab_report, tab_retrofit, tab_hazards, tab_verdict, tab_map = st.tabs([
+        "💶 Area Comps & CMA",
+        "🏗️ Retrofit & Spatial Fabric",
+        "⛈️ Hazards & Legal",
+        "🏁 Verdict & Export",
+        "🗺️ Spatial GIS Map"
+    ])
     
     map_lat, map_lon = 53.3402, -6.3156
     is_d08 = "D08" in extracted_postcode or "D8" in extracted_postcode
@@ -294,20 +321,8 @@ with right_panel:
     if is_d14:
         map_lat, map_lon = 53.2950, -6.2450
 
-    with tab_report:
-        if run_audit_btn:
-            with st.spinner("AI parsing coordinates, modeling cost roads, and preparing final report..."):
-                opening_bid = asking_price * 1.05
-                fmv_ceiling = asking_price * 1.15
-                walkaway_ceiling = fmv_ceiling - total_low
-                
-                # Check for box rooms (SCSI <7.0 sqm threshold)
-                b1_flag = "Habitable" if b1_area >= 7.0 else "UNLIVABLE BOX ROOM"
-                b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
-                b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
-                
-                # Render Report
-                st.session_state.audit_report = f"""
+    if run_audit_btn:
+        st.session_state.audit_report = f"""
 ### 🏛️ 360° Forensic Audit: {address_input}
 *Generated: {datetime.date.today().strftime('%B %d, %Y')}*
 
@@ -368,67 +383,29 @@ Due to your required Capital Works Reserve requirements of **€{total_low:,} �
 * **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones.
 * **Planning Precedents:** Neighbors on the adjacent street successfully secured dormer and extension retention permissions.
 """
-        
-        if "audit_report" in st.session_state and st.session_state.audit_report:
-            st.markdown(st.session_state.audit_report)
-            
-            st.markdown("### 📥 Export Executive Report")
-            c_dl1, c_dl2 = st.columns(2)
-            
-            c_dl1.download_button(
-                label="📥 Download Markdown Version",
-                data=st.session_state.audit_report,
-                file_name="Forensic_Audit_Report.md",
-                mime="text/markdown"
-            )
-            
-            if FPDF:
-                pdf_data = generate_pdf_bytes(st.session_state.audit_report, address_input)
-                c_dl2.download_button(
-                    label="📕 Download Structured PDF Version",
-                    data=pdf_data,
-                    file_name="Forensic_Audit_Report.pdf",
-                    mime="application/pdf"
-                )
-        else:
-            st.info("👈 Enter your Daft URL on the left and click 'Run 360° Forensic Audit' to generate your report.")
 
-    with tab_map:
-        st.subheader("🗺️ Dynamic GIS Spatial Hazards & Planning Precedents")
-        
-        if folium:
-            m = folium.Map(location=[map_lat, map_lon], zoom_start=16)
-            
-            # Target Marker
-            folium.Marker(
-                [map_lat, map_lon],
-                popup="🎯 **Target Property**",
-                tooltip="Target Baseline",
-                icon=folium.Icon(color="red", icon="home")
-            ).add_to(m)
-            
-            # Local Flooding Overlay
-            if is_d08:
-                folium.Circle(
-                    location=[53.3415, -6.3160],
-                    radius=180,
-                    color="blue",
-                    fill=True,
-                    fill_color="blue",
-                    fill_opacity=0.35,
-                    popup="🔴 **OPW Fluvial Flood Risk: River Camac Catchment**"
-                ).add_to(m)
-            elif is_d14:
-                folium.Circle(
-                    location=[53.2970, -6.2480],
-                    radius=200,
-                    color="blue",
-                    fill=True,
-                    fill_color="blue",
-                    fill_opacity=0.3,
-                    popup="⚠️ **OPW Flood Risk: River Dodder Catchment**"
-                ).add_to(m)
-                
-            st_folium(m, width=650, height=450)
+    with tab_report:
+        if st.session_state.audit_report:
+            st.markdown("### Executive Valuation Summary")
+            st.markdown(f"""
+            - **Extracted Address:** {address_input}
+            - **Current Asking Price:** €{asking_price:,}
+            - **Target Floorplate:** {size_sqm} m²
+            """)
+            st.markdown("### Micro-Market CMA & Valuations")
+            st.markdown(f"""
+            | Property Address | Asking Price | Floorplate | BER | Situation |
+            |---|---|---|---|---|
+            | **{address_input}** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** |
+            """)
+            st.markdown(f"""
+            - **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
+            - **Recommended Opening Bid:** €{opening_bid:,.0f}
+            - **Strict Walk-Away Limit:** €{walkaway_ceiling:,.0f}
+            """)
         else:
-            st.info("Folium GIS library not installed.")
+            st.info("👈 Click 'Run 360° Forensic Audit' to generate report data.")
+            
+    with tab_retrofit:
+        if st.session_state.audit_report:
+            st.markdown("### Bedroom Sizes Audit (SCSI T
