@@ -174,44 +174,167 @@ with col_output:
                             uploaded_structural_photo.seek(0)
                             content_payload.append(Image.open(uploaded_structural_photo))
                             
-                        # Highly robust un-formatted raw string template to guarantee zero syntax crashes
+                        # Standard triple quotes with no internal double quotes for absolute compilation safety
                         master_prompt_template = """
                         You are the Lead Forensic Building Surveyor, Real Estate Acquisition Strategist, and Structural/Legal Risk Auditor for residential purchases in Dublin, Ireland.
                         
                         Given only the property URL: {URL}, perform web grounding to parse, extract, and analyze the property. 
                         
                         ### CLIENT SPECIFIC ACQUISITION PARAMETERS:
-                        - **Max Buyer Budget:** EUR {BUDGET}
-                        - **Mortgage Target:** {TARGET_MORTGAGE}
-                        - **Custom Renovation Requested:** "{CUSTOM_RENOVATION}"
+                        - Max Buyer Budget: EUR {BUDGET}
+                        - Mortgage Target: {TARGET_MORTGAGE}
+                        - Custom Renovation Requested: {CUSTOM_RENOVATION}
                         
-                        Generate the complete, unedited, ultra-detailed **360° FORENSIC PROPERTY & COMPREHENSIVE RISK AUDIT (v6.0)** report. Include the following sections and structural tables:
+                        Generate the complete, unedited, ultra-detailed 360 Forensic Property and Risk Audit (v6.0) report. Include the following sections and structural tables:
                         
-                        ### 🏡 DYNAMIC PROPERTY CARD (Extract and Display First):
-                        - **Property Address** (Extracted from Daft/MyHome listing)
-                        - **Eircode** (Identify precisely based on location / search, or default to D08 F5P6 if Inchicore, D14 if Roebuck)
-                        - **Asking Price** (Extracted from Daft/MyHome listing)
-                        - **Certified Habitable Size (sqm)** (Extracted from Daft/MyHome listing or BER)
-                        - **Current BER Rating** (Extracted from Daft/MyHome listing or parsed BER PDF if attached)
-                        - **Year of Construction** (Extract or estimate based on era, e.g. 1950)
+                        ### Dynamic Property Card (Extract and Display First):
+                        - Property Address (Extracted from Daft/MyHome listing)
+                        - Eircode (Identify precisely based on location or search, or default to D08 F5P6 if Inchicore, D14 if Roebuck)
+                        - Asking Price (Extracted from Daft/MyHome listing)
+                        - Certified Habitable Size sqm (Extracted from Daft/MyHome listing or BER)
+                        - Current BER Rating (Extracted from Daft/MyHome listing or parsed BER PDF if attached)
+                        - Year of Construction (Extract or estimate based on era, e.g. 1950)
                         
                         ---
                         ### AUDIT SECTIONS REQUIRED:
                         
-                        1. **EXECUTIVE SUMMARY & STRUCTURAL WORK ASSESSMENT:**
-                           - DIRECTLY analyze the custom work inquiry ("{CUSTOM_RENOVATION}"). Inspect the attached image if provided.
+                        1. EXECUTIVE SUMMARY AND STRUCTURAL WORK ASSESSMENT:
+                           - DIRECTLY analyze the custom work inquiry: {CUSTOM_RENOVATION}. Inspect the attached image if provided.
                            - Provide estimated structural engineering specs, RSJ steel beam requirement, and estimated cost range in EUR.
                            
-                        2. **SECTION 1: HYPER-LOCAL CMA, BER-INDEXED VALUATION & BIDDING CEILING:**
-                           - Area €/m² segmented by BER Performance Tiers (Tier 1: Turnkey Green A1-B3, Tier 2: C1-C3, Tier 3: D1-G).
+                        2. SECTION 1: HYPER-LOCAL CMA, BER-INDEXED VALUATION AND BIDDING CEILING:
+                           - Area EUR/m2 segmented by BER Performance Tiers (Tier 1: Turnkey Green A1-B3, Tier 2: C1-C3, Tier 3: D1-G).
                            - Typology micro-adjustments (e.g. End-of-Terrace side-access premium).
-                           - **The "True Sold €/m²" Comparative Matrix Table:** Render a structured Markdown table comparing the target property against at least 2 real/representative adjacent street sales from the Property Price Register (PPR), adjusted with CSO index multipliers ("In Today's Money"), true m², and adjusted €/m².
-                           - **Underquote & Strategy Detection:** Quantify if the asking price is an underquote compared to neighboring sales.
-                           - Provide **Fair Market Value**, **Aggressive Opening Bid**, and **Strict Walk-Away Ceiling** (Ensure this ceiling subtracts the custom works estimate and energy retrofit net costs).
+                           - The True Sold EUR/m2 Comparative Matrix Table: Render a structured Markdown table comparing the target property against at least 2 real adjacent street sales from the Property Price Register, adjusted with CSO index multipliers (In Today's Money), true m2, and adjusted EUR/m2.
+                           - Underquote and Strategy Detection: Quantify if the asking price is an underquote compared to neighboring sales.
+                           - Provide Fair Market Value, Aggressive Opening Bid, and Strict Walk-Away Ceiling (Ensure this ceiling subtracts the custom works estimate and energy retrofit net costs).
                            
-                        3. **SECTION 2: PHOTOGRAPHIC FORENSICS & VISUAL DEFECT RADAR:**
-                           - Identify visual risks (box rooms < 7sqm, fuse board types, signs of damp/condensation).
+                        3. SECTION 2: PHOTOGRAPHIC FORENSICS AND VISUAL DEFECT RADAR:
+                           - Identify visual risks (box rooms under 7sqm, fuse board types, signs of damp or condensation).
                            
-                        4. **SECTION 3: ERA-SPECIFIC FABRIC, RETROFIT PATHWAYS & COSTING:**
-                           - Era Construction Profile (fabric, solid concrete/cavity wall, acoustic separation).
-               
+                        4. SECTION 3: ERA-SPECIFIC FABRIC, RETROFIT PATHWAYS AND COSTING:
+                           - Era Construction Profile (solid concrete/cavity wall, acoustic separation).
+                           - SPECIFY a phased, itemized, step-by-step cost roadmap (including gross costs, SEAI grants, and net out-of-pocket cash required) to bring this property from its current BER to B3 (Green Mortgage) and to an A-Rating (Net-Zero).
+                           - State the combined Timeline and Move-in delay.
+                           
+                        5. SECTION 4 to 8: Council Planning precedents (e.g. rear extension 40m2 exemption rules), Environmental OPW Flood hazards (check River Camac/Dodder/Poddle), EPA Radon, Legal Title, and Final Acquisition Verdict.
+                        
+                        Format everything in clean Markdown with clear bolding and tables.
+                        """
+                        
+                        master_prompt = master_prompt_template.format(
+                            URL=daft_url,
+                            BUDGET=f"{budget_max:,}",
+                            TARGET_MORTGAGE=target_ber,
+                            CUSTOM_RENOVATION=custom_work_description if custom_work_description else "None"
+                        )
+                        
+                        response_text = generate_ai_content(master_prompt, content_payload)
+                        st.session_state.audit_report = response_text
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error during audit generation: {e}")
+
+        # Display report & download buttons
+        if st.session_state.audit_report:
+            st.markdown(st.session_state.audit_report)
+            
+            # Extract Address dynamically for PDF Header
+            addr_match = re.search(r"Address:\s*(.*)", st.session_state.audit_report, re.IGNORECASE)
+            if addr_match:
+                extracted_address = addr_match.group(1).strip()
+            
+            st.markdown("### 📥 Export Executive Report")
+            c_dl1, c_dl2 = st.columns(2)
+            
+            c_dl1.download_button(
+                label="📥 Download Markdown Version",
+                data=st.session_state.audit_report,
+                file_name="Forensic_Audit_Report.md",
+                mime="text/markdown"
+            )
+            
+            pdf_data = generate_pdf_bytes(st.session_state.audit_report, extracted_address)
+            c_dl2.download_button(
+                label="📕 Download Structured PDF Version",
+                data=pdf_data,
+                file_name="Forensic_Audit_Report.pdf",
+                mime="application/pdf"
+            )
+        else:
+            st.info("👈 Enter your Daft URL on the left and click 'Run 360° Forensic Audit Protocol' to generate your audit report.")
+
+    with tab_map:
+        st.subheader("🗺️ Dynamic GIS Spatial Hazards & Planning Precedents")
+        
+        # Extract Eircode dynamically from the generated report using high-accuracy regex
+        if st.session_state.audit_report:
+            eircode_match = re.search(r"[A-Z]\d{2}\s?[A-Z0-9]{4}", st.session_state.audit_report, re.IGNORECASE)
+            if eircode_match:
+                extracted_eircode = eircode_match.group().upper()
+                is_d08 = "D08" in extracted_eircode
+                is_d14 = "D14" in extracted_eircode
+                if is_d08:
+                    map_lat, map_lon = 53.3402, -6.3156
+                elif is_d14:
+                    map_lat, map_lon = 53.2950, -6.2450
+        
+        # Build Folium Map
+        m = folium.Map(location=[map_lat, map_lon], zoom_start=16)
+        
+        # Target Property Marker
+        folium.Marker(
+            [map_lat, map_lon],
+            popup="🎯 **Target Property**",
+            tooltip="Target Baseline",
+            icon=folium.Icon(color="red", icon="home")
+        ).add_to(m)
+        
+        # Add dynamic spatial hazards based on local Eircode catchments
+        if is_d08:
+            folium.Circle(
+                location=[53.3415, -6.3160],
+                radius=180,
+                color="blue",
+                fill=True,
+                fill_color="blue",
+                fill_opacity=0.35,
+                popup="🔴 **OPW Fluvial Flood Risk: River Camac Catchment**"
+            ).add_to(m)
+            
+            folium.Marker(
+                [53.3395, -6.3145],
+                popup="✅ **Planning Precedent (Approved):** 2-storey rear extension and loft conversion (Reference: 2981/24)",
+                icon=folium.Icon(color="green", icon="info-sign")
+            ).add_to(m)
+            
+            folium.Marker(
+                [53.3400, -6.3150],
+                popup="🟢 **10 Connolly Gardens (Sold):** €665k (Feb 2026)",
+                icon=folium.Icon(color="green", icon="usd")
+            ).add_to(m)
+            
+        elif is_d14:
+            folium.Circle(
+                location=[53.2970, -6.2480],
+                radius=200,
+                color="blue",
+                fill=True,
+                fill_color="blue",
+                fill_opacity=0.3,
+                popup="⚠️ **OPW Flood Risk: River Dodder Catchment**"
+            ).add_to(m)
+            
+            folium.Marker(
+                [53.2940, -6.2435],
+                popup="✅ **Planning Precedent (Approved):** Dormer attic conversion (Reference: D23A/0451)",
+                icon=folium.Icon(color="green", icon="info-sign")
+            ).add_to(m)
+            
+            folium.Marker(
+                [53.2945, -6.2440],
+                popup="🟢 **14 Roebuck Downs (Sold):** €520k",
+                icon=folium.Icon(color="green", icon="usd")
+            ).add_to(m)
+            
+        st_folium(m, width=700, height=450)
