@@ -1,23 +1,35 @@
 import streamlit as st
 import re
 import json
+import datetime
 from io import BytesIO
 
-# Try importing PDF parsing library safely
+# Safely import optional dependencies
 try:
     import pypdf
 except ImportError:
     pypdf = None
 
+try:
+    import folium
+    from streamlit_folium import st_folium
+except ImportError:
+    folium = None
+
+try:
+    from fpdf import FPDF
+except ImportError:
+    FPDF = None
+
 # Set up page configurations
 st.set_page_config(
     page_title="Dublin Property Forensic Audit Engine v6.0",
-    page_icon="🏠",
+    page_icon="🏛️",
     layout="wide"
 )
 
 # ---------------------------------------------------------
-# INITIALIZE VARIABLES & FINANCIAL CONSTANTS
+# INITIALIZE GLOBAL AUDIT STATE
 # ---------------------------------------------------------
 total_low = 0
 total_high = 0
@@ -35,7 +47,7 @@ DUBLIN_COST_DATABASE = {
 }
 
 # ---------------------------------------------------------
-# PARSING & UTILITY FUNCTIONS
+# PARSING & EXPORT UTILITIES
 # ---------------------------------------------------------
 def extract_text_from_pdf(file_bytes):
     if not pypdf:
@@ -50,29 +62,18 @@ def extract_text_from_pdf(file_bytes):
         return f"Error reading PDF: {str(e)}"
 
 def extract_metrics_from_ber_text(text):
-    """
-    Scans the extracted BER PDF text for exact floor area and current rating.
-    """
     metrics = {"size": None, "ber": None}
     if not text:
         return metrics
-        
-    # Search for floor area patterns (e.g. "Dimension: 94.59", "Area: 100 sqm")
     size_match = re.search(r"(?:dimension|area|floor\s+area|size)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:sqm|m²|sq\s*m)", text, re.IGNORECASE)
     if size_match:
         metrics["size"] = float(size_match.group(1))
-        
-    # Search for BER rating letter
     ber_match = re.search(r"\b(A[1-3]|B[1-3]|C[1-3]|D[1-2]|E[1-2]|[FG])\b", text)
     if ber_match:
         metrics["ber"] = ber_match.group(1)
-        
     return metrics
 
 def parse_dublin_url(url):
-    """
-    Robust string parsing to extract address details from raw listing URLs.
-    """
     if not url:
         return None
     clean_url = url.lower().replace("-", " ").replace("_", " ")
@@ -85,7 +86,7 @@ def parse_dublin_url(url):
     street_parts = []
     tokens = clean_url.split("/")
     target_token = tokens[-1] if tokens[-1] else (tokens[-2] if len(tokens) > 1 else "")
-    target_token = re.sub(r"\d{5,}", "", target_token) # remove listing IDs
+    target_token = re.sub(r"\d{5,}", "", target_token)
     target_token = target_token.replace("for sale", "").replace("co dublin", "").strip()
     
     words = target_token.split()
@@ -104,6 +105,52 @@ def parse_dublin_url(url):
         "postcode": postcode
     }
 
+def clean_pdf_text(text):
+    """
+    Ensures no special character or symbol causes FPDF Latin-1 encoding crashes.
+    """
+    replacements = {
+        "€": "EUR ", "²": " sqm", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*",
+        "🏡": "", "📊": "", "📋": "", "👁️": "", "📄": "", "🎯": "", "🏆": "", "🕵️‍♂️": "", "🗺️": "", "🚩": "",
+        "🟢": "[Habitable] ", "🔴": "[Unhabitable] ", "🟡": "[Attention] ", "🔵": "[Water Hazard] ",
+        "⚠️": "Warning: ", "🎉": "Exempt: "
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
+
+def generate_pdf_bytes(report_text, address):
+    if not FPDF:
+        return b"FPDF library is not installed."
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_margins(15, 15, 15)
+    
+    pdf.set_font("Helvetica", style="B", size=15)
+    pdf.cell(0, 10, "360 Forensic Property & Comprehensive Risk Audit", ln=True, align="C")
+    pdf.set_font("Helvetica", size=9)
+    pdf.cell(0, 6, f"Property: {address}", ln=True, align="C")
+    pdf.cell(0, 6, f"Report Generated: {datetime.date.today().strftime('%B %d, %Y')}", ln=True, align="C")
+    pdf.ln(8)
+    
+    cleaned_text = clean_pdf_text(report_text)
+    for line in cleaned_text.split("\n"):
+        if not line.strip():
+            pdf.ln(3)
+        elif line.strip().startswith("###"):
+            pdf.set_font("Helvetica", style="B", size=11)
+            pdf.multi_cell(0, 6, txt=line.replace("###", "").strip())
+            pdf.set_font("Helvetica", size=9)
+        elif line.strip().startswith("##") or line.strip().startswith("#"):
+            pdf.set_font("Helvetica", style="B", size=13)
+            pdf.ln(4)
+            pdf.multi_cell(0, 7, txt=line.replace("##", "").replace("#", "").strip())
+            pdf.set_font("Helvetica", size=9)
+        else:
+            pdf.multi_cell(0, 5, txt=line)
+            
+    return pdf.output(dest="S").encode("latin-1", errors="ignore")
+
 def mock_llm_parse_custom_works(narrative):
     estimates = []
     text = narrative.lower()
@@ -114,225 +161,4 @@ def mock_llm_parse_custom_works(narrative):
             "high": DUBLIN_COST_DATABASE["rsj"]["high"],
             "scope": "Requires structural engineer certificate, steel beam, and local padstone casting."
         })
-    if any(k in text for k in ["heat pump", "pump", "retrofit", "ber", "radiator"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["heat_pump"]["label"],
-            "low": DUBLIN_COST_DATABASE["heat_pump"]["low"],
-            "high": DUBLIN_COST_DATABASE["heat_pump"]["high"],
-            "scope": "Includes SEAI grant application preparation. Low-temp radiator resizing required."
-        })
-    if any(k in text for k in ["attic", "roof", "dormer", "loft"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["attic"]["label"],
-            "low": DUBLIN_COST_DATABASE["attic"]["low"],
-            "high": DUBLIN_COST_DATABASE["attic"]["high"],
-            "scope": "Requires floor joist reinforcement and compliance with TGD Part B (Fire Escape)."
-        })
-    return estimates
-
-# ---------------------------------------------------------
-# STREAMLIT UI - CONFIGURATION & INPUTS
-# ---------------------------------------------------------
-st.title("🏠 Dynamic Dublin Property Forensic Audit Engine")
-st.caption("Custom Daft.ie Listing Parser, Document Classifier, and Financial Underwriter")
-
-left_panel, right_panel = st.columns(2)
-
-with left_panel:
-    st.subheader("1. Ingest Property Coordinates")
-    property_url = st.text_input(
-        "Daft.ie or MyHome.ie Listing URL", 
-        placeholder="Paste any live Dublin property link here..."
-    )
-    
-    # Establish dynamic base values
-    extracted_street = "Target Property"
-    extracted_postcode = "DUBLIN COUNTY"
-    
-    if property_url:
-        parsed_url = parse_dublin_url(property_url)
-        extracted_street = parsed_url["street"]
-        extracted_postcode = parsed_url["postcode"]
-        st.success(f"Listing Ingested: {parsed_url['address']}")
-
-    st.subheader("2. Dual BER Document Ingestion")
-    st.caption("Upload up to two official SEAI technical files (e.g. Certificate and Advisory Report).")
-    uploaded_ber_1 = st.file_uploader("Upload BER Certificate (.pdf)", type=["pdf"], key="ber_1")
-    uploaded_ber_2 = st.file_uploader("Upload BER Advisory Report (.pdf)", type=["pdf"], key="ber_2")
-    
-    ber_text_1 = ""
-    pdf_metrics = {"size": None, "ber": None}
-    if uploaded_ber_1:
-        ber_text_1 = extract_text_from_pdf(uploaded_ber_1.read())
-        pdf_metrics = extract_metrics_from_ber_text(ber_text_1)
-        st.info("BER Certificate parsed successfully.")
-
-    st.subheader("3. Coordinate Calibration (Interactive)")
-    st.caption("Confirm or adjust the coordinate values below. Values auto-calibrate based on parsed data.")
-    
-    # Interactive input fields to override mock data
-    address_input = st.text_input("Property Address", value=f"{extracted_street}, {extracted_postcode}")
-    asking_price = st.number_input("Asking Price (€)", value=525000, step=10000)
-    
-    # Use parsed PDF metrics as defaults if available, else standard fallback
-    default_size = pdf_metrics["size"] if pdf_metrics["size"] else 95.0
-    size_sqm = st.number_input("Floorplate Size (m²)", value=default_size, step=1.0)
-    
-    default_ber = pdf_metrics["ber"] if pdf_metrics["ber"] else "D2"
-    ber_rating = st.selectbox("Current BER Rating", ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], index=10)
-    
-    typology = st.selectbox("Property Typology", ["End-of-Terrace", "Mid-Terrace", "Semi-Detached", "Detached"])
-    
-    st.subheader("4. Asset Media & Spatial Upload")
-    uploaded_media = st.file_uploader(
-        "Upload Floor Plans / Photos (PNG, JPG)", 
-        type=["png", "jpg", "jpeg"], 
-        accept_multiple_files=True
-    )
-
-with right_panel:
-    st.subheader("5. Custom Works & Spatial Analysis Engine")
-    st.markdown("""
-    Describe your renovation plans below (e.g. *'I want to knock down the kitchen wall to install a steel RSJ and retrofit a heat pump'*).
-    """)
-    
-    user_narrative = st.text_area(
-        "Describe your planned renovations:", 
-        height=150, 
-        placeholder="e.g. Knock down the main back wall, install an RSJ steel beam..."
-    )
-    
-    # Process custom works based on narrative input
-    if user_narrative:
-        custom_works = mock_llm_parse_custom_works(user_narrative)
-        if custom_works:
-            total_low = sum(item["low"] for item in custom_works)
-            total_high = sum(item["high"] for item in custom_works)
-            
-            st.success("🎯 Custom plans parsed!")
-            st.markdown("##### Calculated Renovation Budgets")
-            
-            # Construct cost matrix markdown table
-            matrix_rows = ""
-            for w in custom_works:
-                matrix_rows += f"| {w['item']} | €{w['low']:,} – €{w['high']:,} | {w['scope']} |\n"
-                
-            st.markdown(f"""
-            | Work Item | Budget Range | Technical Scope |
-            |---|---|---|
-            {matrix_rows}
-            | **TOTAL RESERVE TARGET** | **€{total_low:,} – €{total_high:,}** | **Will be deducted from your bidding ceiling** |
-            """)
-
-# ---------------------------------------------------------
-# COMPREHENSIVE FORENSIC EXECUTION ENGINE
-# ---------------------------------------------------------
-st.markdown("---")
-if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
-    if not property_url:
-        st.error("Error: A property listing URL is required to compile your audit.")
-    else:
-        with st.spinner("Processing coordinates and modeling localized benchmarks..."):
-            
-            # Calculate final ceilings based on computed custom works
-            opening_bid = asking_price * 1.05
-            fmv_ceiling = asking_price * 1.15
-            walkaway_ceiling = fmv_ceiling - total_low
-            
-            # --- DISPLAY 360° FORENSIC AUDIT ---
-            st.header("📋 360° Forensic Audit & Technical Underwriting Report")
-            st.caption(f"Asset Address: {address_input}")
-            
-            # Executive Summary Block
-            st.markdown(f"""
-            > ### 📌 Executive Summary
-            > The property at **{address_input}** is a viable prospect.
-            > Due to your defined Capital Works Reserve requirements (**€{total_low:,} – €{total_high:,}**), your absolute walk-away bidding ceiling is mathematically capped at **€{walkaway_ceiling:,.0f}** to preserve required cash cushions.
-            """)
-            
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "💶 Area Comps & CMA", 
-                "🏗️ Retrofit & Energy Paths", 
-                "⛈️ Environmental & Legal", 
-                "🏁 Verdict & Playbook"
-            ])
-            
-            with tab1:
-                st.subheader(f"Section 1: Micro-Market CMA & Valuations ({extracted_postcode})")
-                
-                # Dynamic Zone Metrics
-                st.markdown(f"##### Local {extracted_postcode} €/m² Sector Pricing")
-                st.markdown(f"""
-                | BER Performance Tier | Average Price / m² | Target Property Alignment |
-                |---|---|---|
-                | **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | |
-                | **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
-                | **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | **Your target corridor sits here** |
-                """)
-                
-                # Dynamic Comparison Matrix
-                st.markdown("##### Comparable Transaction Matrix (PPR & Adjacent Corridors)")
-                st.markdown(f"""
-                | Address | Street | Sale Status | Price | Size | BER | Situation | m² Rate | Comparability Analysis |
-                |---|---|---|---|---|---|---|---|---|
-                | **{address_input}** | **{extracted_street}** | **Live** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** | **€{asking_price/size_sqm:,.0f}/m²** | **Target Baseline** |
-                | Local Comp 1 | Adjacent Road | Sold | €665,000 | 96 m² | C3 | {typology} | €6,927/m² | Near target corridor |
-                | Local Comp 2 | Adjacent Road | Sold | €575,000 | 70 m² | E1 | {typology} | €8,214/m² | Unextended baseline comp |
-                """)
-                
-                st.markdown(f"""
-                * **Underwriting Boundaries:**
-                  * **Estimated Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
-                  * **Recommended Opening Position:** €{opening_bid:,.0f}
-                  * **Walk-Away Bidding Ceiling:** €{walkaway_ceiling:,.0f} *(Calculated as FMV minus Capital Reserve)*
-                """)
-                
-            with tab2:
-                st.subheader("Section 2 & 3: Structural Fabric & Planning Precedents")
-                
-                col_b3, col_a = st.columns(2)
-                
-                with col_b3:
-                    st.markdown("#### 🟢 The Road to B3 (Green Mortgage)")
-                    st.markdown("""
-                    To qualify for the Haven/AIB **3.20% Green Interest Rate**, you must raise the property from D2 to B3. This is achievable via targeted individual grants.
-                    
-                    | Upgrade Measure | Gross Cost | SEAI Individual Grant | Net Out-of-Pocket |
-                    |---|---|---|---|
-                    | **Attic Insulation** | €2,500 | €1,500 | €1,000 |
-                    | **Cavity Wall Injection** | €2,200 | €1,200 | €1,000 |
-                    | **Heating Controls Zoned Upgrade** | €1,800 | €700 | €1,110 |
-                    | **TOTAL B3 PATHWAY** | **€6,500** | **€3,400** | **€3,100** |
-                    """)
-                    st.info("💡 *Note: Individual measures do not require a One-Stop-Shop contractor.*")
-
-                with col_a:
-                    st.markdown("#### 🔵 The Road to A-Rating (Deep Retrofit)")
-                    st.markdown("""
-                    For complete future-proofing and installation of low-temp Air-to-Water heat pumps.
-                    
-                    | Upgrade Measure | Gross Cost | SEAI Individual Grant | Net Out-of-Pocket |
-                    |---|---|---|---|
-                    | **External Wall Insulation** | €18,000 | €6,000 | €12,000 |
-                    | **Air-to-Water Heat Pump** | €16,000 | €6,500 | €9,500 |
-                    | **Demand Controlled Vent.** | €3,500 | €0 *(One-Stop Only)* | €3,500 |
-                    | **Solar PV Array (3.2 kWp)** | €6,500 | €2,100 | €4,400 |
-                    | **TOTAL A-RATING PATHWAY** | **€44,000** | **€14,600** | **€29,400** |
-                    """)
-                    
-            with tab3:
-                st.subheader("Section 4 & 5: Climate Hazards, Title & Legal Risks")
-                st.markdown("""
-                * **Conveyancing Check:** Your solicitor must verify if the sale is subject to probate delays (which can stall the closing process by 6–12 months).
-                * **OPW Flooding History:** Proximity checks must be executed against local rivers to ensure standard home insurance can be secured.
-                * **Tenure Verification:** Confirm that the property is **Freehold** or Leasehold with at least 70+ years remaining.
-                """)
-                
-            with tab4:
-                st.subheader("Section 7: Final Verdict & Negotiation Plan")
-                st.markdown(f"""
-                * **Categorical Audit Verdict:** ⚖️ **CONDITIONAL BUY**
-                * **Bidding Roadmap:**
-                  1. **Opening Bid:** Start at **€{opening_bid:,.0f}** to signal standard liquidity and intent.
-                  2. **Hard Limit:** Never exceed your walk-away threshold of **€{walkaway_ceiling:,.0f}**.
-                """)
+    if any(k in text for k in ["heat pump", "pump", "r
