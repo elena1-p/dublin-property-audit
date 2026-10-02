@@ -24,7 +24,7 @@ if "custom_works" not in st.session_state:
     st.session_state.custom_works = []
 
 # --- LEFT COLUMN: DATA INGESTION & AUDIT INPUTS ---
-col_input, col_audit = st.columns()
+col_input, col_audit = st.columns(2)
 
 with col_input:
     st.header("1. Property Identifiers")
