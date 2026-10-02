@@ -33,11 +33,16 @@ if "audit_report" not in st.session_state:
     st.session_state.audit_report = ""
 
 # ---------------------------------------------------------
-# INITIALIZE GLOBAL AUDIT STATE
+# INITIALIZE GLOBAL AUDIT STATE & GEOGRAPHIC BASES
 # ---------------------------------------------------------
 total_low = 0
 total_high = 0
 custom_works = []
+
+# FIX: Hoisted geographic variables to prevent NameErrors on page load
+map_lat, map_lon = 53.3402, -6.3156  # Default Dublin Coordinates (D08 Inchicore)
+is_d08 = True
+is_d14 = False
 
 # Raw Cost Database for Dublin (Materials & Labour Q3 2026)
 DUBLIN_COST_DATABASE = {
@@ -119,6 +124,7 @@ def clean_pdf_text(text):
     for k, v in replacements.items():
         text = text.replace(k, v)
         
+    # Strip table dividing line segments to prevent FPDF narrow multi_cell wrap crash
     text = re.sub(r"\|[-:| ]+\|", "", text)
     text = text.replace("|", "  ")
     
@@ -203,6 +209,14 @@ with left_panel:
         extracted_street = parsed_url["street"]
         extracted_postcode = parsed_url["postcode"]
         st.success("Listing Ingested: " + parsed_url["address"])
+
+    # Map state configuration derived dynamically from URL
+    is_d08 = "D08" in extracted_postcode or "D8" in extracted_postcode
+    is_d14 = "D14" in extracted_postcode or "DUNDRUM" in extracted_street.upper()
+    if is_d14:
+        map_lat, map_lon = 53.2950, -6.2450
+    else:
+        map_lat, map_lon = 53.3402, -6.3156
 
     st.subheader("2. BER Document Ingestion (Combined Slot)")
     ber_pdfs = st.file_uploader(
@@ -294,12 +308,11 @@ b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
 b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
 
 # ---------------------------------------------------------
-# REPORT OUTPUT & SPATIAL ENGINE (MULTI-TAB RESTORED)
+# REPORT OUTPUT & SPATIAL ENGINE
 # ---------------------------------------------------------
 with right_panel:
     st.subheader("📋 Forensic Audit & Strategic Acquisition Report")
     
-    # Configured output tabs to restore previous tabbed layout
     tab_report, tab_retrofit, tab_hazards, tab_verdict, tab_map = st.tabs([
         "💶 Area Comps & CMA",
         "🏗️ Retrofit & Spatial Fabric",
@@ -307,6 +320,36 @@ with right_panel:
         "🏁 Verdict & Export",
         "🗺️ Spatial GIS Map"
     ])
-    
-    map_lat, map_lon = 53.3402, -6.3156
-    is_d08
+
+    if run_audit_btn:
+        st.session_state.audit_report = f"""
+### 🏛️ 360° Forensic Audit: {address_input}
+*Generated: {datetime.date.today().strftime('%B %d, %Y')}*
+
+---
+
+### EXECUTIVE SUMMARY:
+The property at **{address_input}** represents an excellent target matching your maximum budget of **€{budget_max:,}**. 
+Due to your required Capital Works Reserve requirements of **€{total_low:,} – €{total_high:,}**, your absolute walk-away bidding limit is calculated at **€{walkaway_ceiling:,.0f}** to preserve structural cash cushions.
+
+---
+
+### SECTION 1: MICRO-MARKET CMA & VALUATIONS
+
+| BER Performance Tier | Average Price / m² | Target Property Alignment |
+|---|---|---|
+| **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | **Your target aligns here** |
+| **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
+| **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | |
+
+#### Extended Comparable Transaction Matrix
+| Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability |
+|---|---|---|---|---|---|---|---|---|
+| **{address_input}** | **{extracted_street}** | **Live** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** | **€{asking_price/size_sqm:,.0f}/m²** | **Target Property** |
+| Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | {typology} | €6,927/m² | Near target baseline |
+| Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | {typology} | €5,948/m² | Unmodernised comp |
+
+#### Valuation & Acquisition Boundaries
+* **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
+* **Recommended Opening Bid:** €{opening_bid:,.0f} (Asking + 5%)
+* 
