@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# INITIALIZE GLOBAL AUDIT STATE
+# INITIALIZE VARIABLES & FINANCIAL CONSTANTS
 # ---------------------------------------------------------
 total_low = 0
 total_high = 0
@@ -35,55 +35,8 @@ DUBLIN_COST_DATABASE = {
 }
 
 # ---------------------------------------------------------
-# DYNAMIC URL GEOGRAPHIC PARSING ENGINE
+# PARSING & UTILITY FUNCTIONS
 # ---------------------------------------------------------
-def parse_dublin_url(url):
-    """
-    Parses Daft/MyHome URLs to extract the Address, Postcode, 
-    and Street Name to perform a localized search.
-    """
-    if not url:
-        return None
-        
-    # Clean the URL text
-    clean_url = url.lower().replace("-", " ")
-    
-    # Extract postal district (e.g. Dublin 14, Dublin 8, Dublin 6w)
-    postcode_match = re.search(r"dublin\s+(\d+[a-z]?)", clean_url)
-    postcode = postcode_match.group(0).upper().strip() if postcode_match else "DUBLIN COUNTY"
-    
-    # Extract probable street/estate name by finding keywords before 'dublin'
-    street_parts = []
-    tokens = clean_url.split("/")
-    target_token = tokens[-1] if tokens[-1] else (tokens[-2] if len(tokens) > 1 else "")
-    
-    # Clean listing suffixes
-    target_token = re.sub(r"\d{5,}", "", target_token) # remove IDs
-    target_token = target_token.replace("for sale", "").replace("co dublin", "").strip()
-    
-    words = target_token.split()
-    for w in words:
-        if "dublin" in w or w.isdigit():
-            break
-        street_parts.append(w.capitalize())
-        
-    street_name = " ".join(street_parts).strip()
-    if not street_name:
-        street_name = "Target Property Corridor"
-        
-    # Standard fallback mock database to keep the app dynamic
-    return {
-        "address": f"{street_name}, {postcode}",
-        "street": street_name,
-        "asking_price": 575000,  # Dynamic baseline
-        "beds": 3,
-        "baths": 2,
-        "size_sqm": 95.0,
-        "typology": "Terraced House",
-        "ber": "D2",
-        "postcode": postcode
-    }
-
 def extract_text_from_pdf(file_bytes):
     if not pypdf:
         return "pypdf library not installed. Cannot parse PDF text."
@@ -96,10 +49,64 @@ def extract_text_from_pdf(file_bytes):
     except Exception as e:
         return f"Error reading PDF: {str(e)}"
 
+def extract_metrics_from_ber_text(text):
+    """
+    Scans the extracted BER PDF text for exact floor area and current rating.
+    """
+    metrics = {"size": None, "ber": None}
+    if not text:
+        return metrics
+        
+    # Search for floor area patterns (e.g. "Dimension: 94.59", "Area: 100 sqm")
+    size_match = re.search(r"(?:dimension|area|floor\s+area|size)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:sqm|m²|sq\s*m)", text, re.IGNORECASE)
+    if size_match:
+        metrics["size"] = float(size_match.group(1))
+        
+    # Search for BER rating letter
+    ber_match = re.search(r"\b(A[1-3]|B[1-3]|C[1-3]|D[1-2]|E[1-2]|[FG])\b", text)
+    if ber_match:
+        metrics["ber"] = ber_match.group(1)
+        
+    return metrics
+
+def parse_dublin_url(url):
+    """
+    Robust string parsing to extract address details from raw listing URLs.
+    """
+    if not url:
+        return None
+    clean_url = url.lower().replace("-", " ").replace("_", " ")
+    
+    # Extract postal district
+    postcode_match = re.search(r"dublin\s+(\d+[a-z]?)", clean_url)
+    postcode = postcode_match.group(0).upper().strip() if postcode_match else "DUBLIN COUNTY"
+    
+    # Extract probable street/estate name
+    street_parts = []
+    tokens = clean_url.split("/")
+    target_token = tokens[-1] if tokens[-1] else (tokens[-2] if len(tokens) > 1 else "")
+    target_token = re.sub(r"\d{5,}", "", target_token) # remove listing IDs
+    target_token = target_token.replace("for sale", "").replace("co dublin", "").strip()
+    
+    words = target_token.split()
+    for w in words:
+        if "dublin" in w or w.isdigit() or w in ["sale", "lease"]:
+            break
+        street_parts.append(w.capitalize())
+        
+    street_name = " ".join(street_parts).strip()
+    if not street_name:
+        street_name = "Target Property"
+        
+    return {
+        "address": f"{street_name}, {postcode}",
+        "street": street_name,
+        "postcode": postcode
+    }
+
 def mock_llm_parse_custom_works(narrative):
     estimates = []
     text = narrative.lower()
-    
     if any(k in text for k in ["wall", "knock", "rsj", "steel", "open plan"]):
         estimates.append({
             "item": DUBLIN_COST_DATABASE["rsj"]["label"],
@@ -121,13 +128,6 @@ def mock_llm_parse_custom_works(narrative):
             "high": DUBLIN_COST_DATABASE["attic"]["high"],
             "scope": "Requires floor joist reinforcement and compliance with TGD Part B (Fire Escape)."
         })
-    if any(k in text for k in ["wire", "rewire", "electrics", "fuseboard"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["rewire"]["label"],
-            "low": DUBLIN_COST_DATABASE["rewire"]["low"],
-            "high": DUBLIN_COST_DATABASE["rewire"]["high"],
-            "scope": "Requires RECI certified testing and complete chasing of masonry."
-        })
     return estimates
 
 # ---------------------------------------------------------
@@ -139,44 +139,51 @@ st.caption("Custom Daft.ie Listing Parser, Document Classifier, and Financial Un
 left_panel, right_panel = st.columns(2)
 
 with left_panel:
-    st.subheader("1. Ingest Property Listing")
+    st.subheader("1. Ingest Property Coordinates")
     property_url = st.text_input(
         "Daft.ie or MyHome.ie Listing URL", 
         placeholder="Paste any live Dublin property link here..."
     )
     
-    parsed_listing = {}
+    # Establish dynamic base values
+    extracted_street = "Target Property"
+    extracted_postcode = "DUBLIN COUNTY"
+    
     if property_url:
-        parsed_listing = parse_dublin_url(property_url)
-        st.success(f"Listing Ingested: {parsed_listing['address']}")
-        
-        st.markdown("##### Extracted Coordinates")
-        st.markdown(f"""
-        | Coordinate | Extracted Value |
-        |---|---|
-        | **Address** | {parsed_listing['address']} |
-        | **Asking Price** | €{parsed_listing['asking_price']:,} (Estimated Base) |
-        | **Floor Area** | {parsed_listing['size_sqm']} m² (Standard Baseline) |
-        | **Current BER** | **{parsed_listing['ber']}** |
-        | **Postal District** | {parsed_listing['postcode']} |
-        """)
+        parsed_url = parse_dublin_url(property_url)
+        extracted_street = parsed_url["street"]
+        extracted_postcode = parsed_url["postcode"]
+        st.success(f"Listing Ingested: {parsed_url['address']}")
 
     st.subheader("2. Dual BER Document Ingestion")
     st.caption("Upload up to two official SEAI technical files (e.g. Certificate and Advisory Report).")
-    
     uploaded_ber_1 = st.file_uploader("Upload BER Certificate (.pdf)", type=["pdf"], key="ber_1")
     uploaded_ber_2 = st.file_uploader("Upload BER Advisory Report (.pdf)", type=["pdf"], key="ber_2")
     
     ber_text_1 = ""
-    ber_text_2 = ""
+    pdf_metrics = {"size": None, "ber": None}
     if uploaded_ber_1:
         ber_text_1 = extract_text_from_pdf(uploaded_ber_1.read())
+        pdf_metrics = extract_metrics_from_ber_text(ber_text_1)
         st.info("BER Certificate parsed successfully.")
-    if uploaded_ber_2:
-        ber_text_2 = extract_text_from_pdf(uploaded_ber_2.read())
-        st.info("BER Advisory Report parsed successfully.")
 
-    st.subheader("3. Asset Media & Spatial Upload")
+    st.subheader("3. Coordinate Calibration (Interactive)")
+    st.caption("Confirm or adjust the coordinate values below. Values auto-calibrate based on parsed data.")
+    
+    # Interactive input fields to override mock data
+    address_input = st.text_input("Property Address", value=f"{extracted_street}, {extracted_postcode}")
+    asking_price = st.number_input("Asking Price (€)", value=525000, step=10000)
+    
+    # Use parsed PDF metrics as defaults if available, else standard fallback
+    default_size = pdf_metrics["size"] if pdf_metrics["size"] else 95.0
+    size_sqm = st.number_input("Floorplate Size (m²)", value=default_size, step=1.0)
+    
+    default_ber = pdf_metrics["ber"] if pdf_metrics["ber"] else "D2"
+    ber_rating = st.selectbox("Current BER Rating", ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], index=10)
+    
+    typology = st.selectbox("Property Typology", ["End-of-Terrace", "Mid-Terrace", "Semi-Detached", "Detached"])
+    
+    st.subheader("4. Asset Media & Spatial Upload")
     uploaded_media = st.file_uploader(
         "Upload Floor Plans / Photos (PNG, JPG)", 
         type=["png", "jpg", "jpeg"], 
@@ -184,7 +191,7 @@ with left_panel:
     )
 
 with right_panel:
-    st.subheader("4. Custom Works & Spatial Analysis Engine")
+    st.subheader("5. Custom Works & Spatial Analysis Engine")
     st.markdown("""
     Describe your renovation plans below (e.g. *'I want to knock down the kitchen wall to install a steel RSJ and retrofit a heat pump'*).
     """)
@@ -228,19 +235,18 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
         with st.spinner("Processing coordinates and modeling localized benchmarks..."):
             
             # Calculate final ceilings based on computed custom works
-            asking = parsed_listing["asking_price"]
-            opening_bid = asking * 1.05
-            fmv_ceiling = asking * 1.15
+            opening_bid = asking_price * 1.05
+            fmv_ceiling = asking_price * 1.15
             walkaway_ceiling = fmv_ceiling - total_low
             
             # --- DISPLAY 360° FORENSIC AUDIT ---
             st.header("📋 360° Forensic Audit & Technical Underwriting Report")
-            st.caption(f"Asset Address: {parsed_listing['address']}")
+            st.caption(f"Asset Address: {address_input}")
             
             # Executive Summary Block
             st.markdown(f"""
             > ### 📌 Executive Summary
-            > The property at **{parsed_listing['address']}** is a viable prospect.
+            > The property at **{address_input}** is a viable prospect.
             > Due to your defined Capital Works Reserve requirements (**€{total_low:,} – €{total_high:,}**), your absolute walk-away bidding ceiling is mathematically capped at **€{walkaway_ceiling:,.0f}** to preserve required cash cushions.
             """)
             
@@ -252,10 +258,10 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
             ])
             
             with tab1:
-                st.subheader(f"Section 1: Micro-Market CMA & Valuations ({parsed_listing['postcode']})")
+                st.subheader(f"Section 1: Micro-Market CMA & Valuations ({extracted_postcode})")
                 
                 # Dynamic Zone Metrics
-                st.markdown(f"##### Local {parsed_listing['postcode']} €/m² Sector Pricing")
+                st.markdown(f"##### Local {extracted_postcode} €/m² Sector Pricing")
                 st.markdown(f"""
                 | BER Performance Tier | Average Price / m² | Target Property Alignment |
                 |---|---|---|
@@ -269,9 +275,9 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
                 st.markdown(f"""
                 | Address | Street | Sale Status | Price | Size | BER | Situation | m² Rate | Comparability Analysis |
                 |---|---|---|---|---|---|---|---|---|
-                | **{parsed_listing['address']}** | **{parsed_listing['street']}** | **Live** | **€{asking:,}** | **{parsed_listing['size_sqm']} m²** | **D2** | **{parsed_listing['typology']}** | **€{asking/parsed_listing['size_sqm']:,.0f}/m²** | **Target Baseline** |
-                | Local Comp 1 | Adjacent Road | Sold | €665,000 | 96 m² | C3 | Terraced | €6,927/m² | Near target corridor |
-                | Local Comp 2 | Adjacent Road | Sold | €575,000 | 70 m² | E1 | Terraced | €8,214/m² | Unextended baseline comp |
+                | **{address_input}** | **{extracted_street}** | **Live** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** | **€{asking_price/size_sqm:,.0f}/m²** | **Target Baseline** |
+                | Local Comp 1 | Adjacent Road | Sold | €665,000 | 96 m² | C3 | {typology} | €6,927/m² | Near target corridor |
+                | Local Comp 2 | Adjacent Road | Sold | €575,000 | 70 m² | E1 | {typology} | €8,214/m² | Unextended baseline comp |
                 """)
                 
                 st.markdown(f"""
@@ -316,7 +322,7 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
                     
             with tab3:
                 st.subheader("Section 4 & 5: Climate Hazards, Title & Legal Risks")
-                st.markdown(f"""
+                st.markdown("""
                 * **Conveyancing Check:** Your solicitor must verify if the sale is subject to probate delays (which can stall the closing process by 6–12 months).
                 * **OPW Flooding History:** Proximity checks must be executed against local rivers to ensure standard home insurance can be secured.
                 * **Tenure Verification:** Confirm that the property is **Freehold** or Leasehold with at least 70+ years remaining.
