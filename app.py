@@ -164,4 +164,98 @@ with col_output:
             if not has_model and not api_key:
                 st.error("⚠️ GEMINI_API_KEY is not configured in Streamlit Secrets.")
             else:
-       
+                with st.spinner("AI parsing listing, analyzing files, and generating comprehensive report..."):
+                    try:
+                        content_payload = []
+                        if ber_pdf is not None:
+                            ber_pdf.seek(0)
+                            content_payload.append({"mime_type": "application/pdf", "data": ber_pdf.read()})
+                        if uploaded_structural_photo is not None:
+                            uploaded_structural_photo.seek(0)
+                            content_payload.append(Image.open(uploaded_structural_photo))
+                            
+                        # Highly robust un-formatted raw string template to guarantee zero syntax crashes
+                        master_prompt_template = """
+                        You are the Lead Forensic Building Surveyor, Real Estate Acquisition Strategist, and Structural/Legal Risk Auditor for residential purchases in Dublin, Ireland.
+                        
+                        Given only the property URL: {URL}, perform web grounding to parse, extract, and analyze the property. 
+                        
+                        ### CLIENT SPECIFIC ACQUISITION PARAMETERS:
+                        - **Max Buyer Budget:** EUR {BUDGET}
+                        - **Mortgage Target:** {TARGET_MORTGAGE}
+                        - **Custom Renovation Requested:** "{CUSTOM_RENOVATION}"
+                        
+                        Generate the complete, unedited, ultra-detailed **360° FORENSIC PROPERTY & COMPREHENSIVE RISK AUDIT (v6.0)** report. Include the following sections and structural tables:
+                        
+                        ### 🏡 DYNAMIC PROPERTY CARD (Extract and Display First):
+                        - **Property Address** (Extracted from Daft/MyHome listing)
+                        - **Eircode** (Identify precisely based on location / search, or default to D08 F5P6 if Inchicore, D14 if Roebuck)
+                        - **Asking Price** (Extracted from Daft/MyHome listing)
+                        - **Certified Habitable Size (sqm)** (Extracted from Daft/MyHome listing or BER)
+                        - **Current BER Rating** (Extracted from Daft/MyHome listing or parsed BER PDF if attached)
+                        - **Year of Construction** (Extract or estimate based on era, e.g. 1950)
+                        
+                        ---
+                        ### AUDIT SECTIONS REQUIRED:
+                        
+                        1. **EXECUTIVE SUMMARY & STRUCTURAL WORK ASSESSMENT:**
+                           - DIRECTLY analyze the custom work inquiry ("{CUSTOM_RENOVATION}"). Inspect the attached image if provided.
+                           - Provide estimated structural engineering specs, RSJ steel beam requirement, and estimated cost range in EUR.
+                           
+                        2. **SECTION 1: HYPER-LOCAL CMA, BER-INDEXED VALUATION & BIDDING CEILING:**
+                           - Area €/m² segmented by BER Performance Tiers (Tier 1: Turnkey Green A1-B3, Tier 2: C1-C3, Tier 3: D1-G).
+                           - Typology micro-adjustments (e.g. End-of-Terrace side-access premium).
+                           - **The "True Sold €/m²" Comparative Matrix Table:** Render a structured Markdown table comparing the target property against at least 2 real/representative adjacent street sales from the Property Price Register (PPR), adjusted with CSO index multipliers ("In Today's Money"), true m², and adjusted €/m².
+                           - **Underquote & Strategy Detection:** Quantify if the asking price is an underquote compared to neighboring sales.
+                           - Provide **Fair Market Value**, **Aggressive Opening Bid**, and **Strict Walk-Away Ceiling** (Ensure this ceiling subtracts the custom works estimate and energy retrofit net costs).
+                           
+                        3. **SECTION 2: PHOTOGRAPHIC FORENSICS & VISUAL DEFECT RADAR:**
+                           - Identify visual risks (box rooms < 7sqm, fuse board types, signs of damp/condensation).
+                           
+                        4. **SECTION 3: ERA-SPECIFIC FABRIC, RETROFIT PATHWAYS & COSTING:**
+                           - Era Construction Profile (fabric, solid concrete/cavity wall, acoustic separation).
+                           - SPECIFY a phased, itemized, step-by-step cost roadmap (including gross costs, SEAI grants, and net out-of-pocket cash required) to bring this property from its current BER to **B3 (Green Mortgage)** and to an **A-Rating (Net-Zero)**.
+                           - State the combined Timeline & Move-in delay.
+                           
+                        5. **SECTION 4 to 8:** Council Planning precedents (e.g. rear extension 40m² exemption rules), Environmental OPW Flood hazards (check River Camac/Dodder/Poddle), EPA Radon, Legal Title, and Final Acquisition Verdict.
+                        
+                        Format everything in clean Markdown with clear bolding and tables.
+                        """
+                        
+                        master_prompt = master_prompt_template.format(
+                            URL=daft_url,
+                            BUDGET=f"{budget_max:,}",
+                            TARGET_MORTGAGE=target_ber,
+                            CUSTOM_RENOVATION=custom_work_description if custom_work_description else "None"
+                        )
+                        
+                        response_text = generate_ai_content(master_prompt, content_payload)
+                        st.session_state.audit_report = response_text
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error during audit generation: {e}")
+
+        # Display report & download buttons
+        if st.session_state.audit_report:
+            st.markdown(st.session_state.audit_report)
+            
+            # Extract Address dynamically for PDF Header
+            addr_match = re.search(r"Address:\s*(.*)", st.session_state.audit_report, re.IGNORECASE)
+            if addr_match:
+                extracted_address = addr_match.group(1).strip()
+            
+            st.markdown("### 📥 Export Executive Report")
+            c_dl1, c_dl2 = st.columns(2)
+            
+            c_dl1.download_button(
+                label="📥 Download Markdown Version",
+                data=st.session_state.audit_report,
+                file_name="Forensic_Audit_Report.md",
+                mime="text/markdown"
+            )
+            
+            pdf_data = generate_pdf_bytes(st.session_state.audit_report, extracted_address)
+            c_dl2.download_button(
+                label="📕 Download Structured PDF Version",
+                data=pdf_data,
+            
