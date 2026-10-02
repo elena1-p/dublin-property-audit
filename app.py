@@ -22,7 +22,7 @@ st.markdown("Automate physical audits, analyze retrofitting costs, and project 3
 st.markdown("---")
 
 # --- LAYOUT: INPUTS (LEFT) vs ANALYSIS (RIGHT) ---
-col_input, col_analysis = st.columns()
+col_input, col_analysis = st.columns(2)
 
 with col_input:
     st.header("📇 Property Identifiers")
