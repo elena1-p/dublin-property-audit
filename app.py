@@ -110,10 +110,6 @@ def parse_dublin_url(url):
     }
 
 def clean_pdf_text(text):
-    """
-    Cleans raw markdown structures, table formatting, and non-Latin-1 characters 
-    to prevent FPDF layout wrapping loop errors.
-    """
     replacements = {
         "€": "EUR ", "²": " sqm", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*",
         "🏡": "", "📊": "", "📋": "", "👁️": "", "📄": "", "🎯": "", "🏆": "", "🕵️‍♂️": "", "🗺️": "", "🚩": "",
@@ -123,11 +119,9 @@ def clean_pdf_text(text):
     for k, v in replacements.items():
         text = text.replace(k, v)
         
-    # FIX: Explicitly remove markdown table divider markers to prevent narrow-cell FPDF wrap loops
     text = re.sub(r"\|[-:| ]+\|", "", text)
     text = text.replace("|", "  ")
     
-    # Strip any characters outside Latin-1 encoding safely
     cleaned = text.encode("latin-1", errors="ignore").decode("latin-1")
     return cleaned
 
@@ -246,8 +240,8 @@ with left_panel:
     with media_tab2:
         pasted_data = st.text_input("Clipboard Buffer", placeholder="Ctrl+V or drop an image into this window...")
 
-    st.subheader("🔧 Spatial & Custom Works")
-    user_narrative = st.text_input("Custom Work Description", placeholder="e.g. Knock down wall, install RSJ and heat pump")
+    st.subheader("🔧 Custom Works")
+    user_narrative = st.text_input("Custom Work Description", value="Knock down main wall and install RSJ beam and a heat pump")
 
     st.subheader("🛌 Bedroom Dimensions Audit")
     b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
@@ -305,7 +299,7 @@ b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
 with right_panel:
     st.subheader("📋 Forensic Audit & Strategic Acquisition Report")
     
-    # FIX: Explicitly configured output tabs to restore previous tabbed layout
+    # Configured output tabs to restore previous tabbed layout
     tab_report, tab_retrofit, tab_hazards, tab_verdict, tab_map = st.tabs([
         "💶 Area Comps & CMA",
         "🏗️ Retrofit & Spatial Fabric",
@@ -315,97 +309,4 @@ with right_panel:
     ])
     
     map_lat, map_lon = 53.3402, -6.3156
-    is_d08 = "D08" in extracted_postcode or "D8" in extracted_postcode
-    is_d14 = "D14" in extracted_postcode or "DUNDRUM" in extracted_street.upper()
-    
-    if is_d14:
-        map_lat, map_lon = 53.2950, -6.2450
-
-    if run_audit_btn:
-        st.session_state.audit_report = f"""
-### 🏛️ 360° Forensic Audit: {address_input}
-*Generated: {datetime.date.today().strftime('%B %d, %Y')}*
-
----
-
-### EXECUTIVE SUMMARY:
-The property at **{address_input}** represents an excellent target matching your maximum budget of **€{budget_max:,}**. 
-Due to your required Capital Works Reserve requirements of **€{total_low:,} – €{total_high:,}**, your absolute walk-away bidding limit is calculated at **€{walkaway_ceiling:,.0f}** to preserve structural cash cushions.
-
----
-
-### SECTION 1: MICRO-MARKET CMA & VALUATIONS
-
-| BER Performance Tier | Average Price / m² | Target Property Alignment |
-|---|---|---|
-| **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | **Your target aligns here** |
-| **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
-| **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | |
-
-#### Extended Comparable Transaction Matrix
-| Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability |
-|---|---|---|---|---|---|---|---|---|
-| **{address_input}** | **{extracted_street}** | **Live** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** | **€{asking_price/size_sqm:,.0f}/m²** | **Target Property** |
-| Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | {typology} | €6,927/m² | Near target baseline |
-| Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | {typology} | €5,948/m² | Unmodernised comp |
-
-#### Valuation & Acquisition Boundaries
-* **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
-* **Recommended Opening Bid:** €{opening_bid:,.0f} (Asking + 5%)
-* **Strict Walk-Away Limit:** €{walkaway_ceiling:,.0f} (FMV minus Capital Works Reserves)
-
----
-
-### SECTION 2: BEDROOM SIZE AUDIT (SCSI STANDARDS)
-* **Bedroom 1:** {b1_w}m x {b1_l}m = **{b1_area:.2f} m²** ({b1_flag})
-* **Bedroom 2:** {b2_w}m x {b2_l}m = **{b2_area:.2f} m²** ({b2_flag})
-* **Bedroom 3:** {b3_w}m x {b3_l}m = **{b3_area:.2f} m²** ({b3_flag})
-
-*Note: Under standard SCSI protocols, any room under 7.0 m² cannot be marketed as a bedroom.*
-
----
-
-### SECTION 3: ROAD TO B3 & A RATING ROADMAPS
-
-#### 🟢 The Road to B3 (Green Mortgage Rate Eligibility)
-* **Attic Insulation:** Gross €2,500 | SEAI Grant: €1,500 | **Net: €1,000**
-* **Heating Controls:** Gross €1,800 | SEAI Grant: €700 | **Net: €1,110**
-* **TOTAL ROAD TO B3:** **Gross €4,300 | Grants €2,200 | Net €2,110**
-
-#### 🔵 The Road to A-Rating (Deep Retrofit / Net-Zero)
-* **External Wall Insulation:** Gross €18,000 | SEAI Grant: €6,000 | **Net: €12,000**
-* **Air-to-Water Heat Pump:** Gross €16,000 | SEAI Grant: €6,500 | **Net: €9,500**
-* **TOTAL ROAD TO A:** **Gross €34,000 | Grants €12,500 | Net €21,500**
-
----
-
-### SECTION 4: HAZARDS & SURVEY SCAN
-* **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones.
-* **Planning Precedents:** Neighbors on the adjacent street successfully secured dormer and extension retention permissions.
-"""
-
-    with tab_report:
-        if st.session_state.audit_report:
-            st.markdown("### Executive Valuation Summary")
-            st.markdown(f"""
-            - **Extracted Address:** {address_input}
-            - **Current Asking Price:** €{asking_price:,}
-            - **Target Floorplate:** {size_sqm} m²
-            """)
-            st.markdown("### Micro-Market CMA & Valuations")
-            st.markdown(f"""
-            | Property Address | Asking Price | Floorplate | BER | Situation |
-            |---|---|---|---|---|
-            | **{address_input}** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** |
-            """)
-            st.markdown(f"""
-            - **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
-            - **Recommended Opening Bid:** €{opening_bid:,.0f}
-            - **Strict Walk-Away Limit:** €{walkaway_ceiling:,.0f}
-            """)
-        else:
-            st.info("👈 Click 'Run 360° Forensic Audit' to generate report data.")
-            
-    with tab_retrofit:
-        if st.session_state.audit_report:
-            st.markdown("### Bedroom Sizes Audit (SCSI T
+    is_d08
