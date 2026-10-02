@@ -17,7 +17,6 @@ except ImportError:
     folium = None
 
 try:
-    import fpdf
     from fpdf import FPDF
 except ImportError:
     FPDF = None
@@ -63,11 +62,11 @@ def extract_metrics_from_ber_text(text):
     metrics = {"size": None, "ber": None}
     if not text:
         return metrics
-    # Fixed raw escapes to prevent compilation failure
-    size_match = re.search(r"(?:dimension|area|floor\s+area|size)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:sqm|m²|sq\s*m)", text, re.IGNORECASE)
+    # Double-escaped backslashes to resolve the compile-time quote leak completely
+    size_match = re.search(r"(?:dimension|area|floor\\s+area|size)\\s*[:\\-]?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:sqm|m²|sq\\s*m)", text, re.IGNORECASE)
     if size_match:
         metrics["size"] = float(size_match.group(1))
-    ber_match = re.search(r"\b(A[1-3]|B[1-3]|C[1-3]|D[1-2]|E[1-2]|[FG])\b", text)
+    ber_match = re.search(r"\\b(A[1-3]|B[1-3]|C[1-3]|D[1-2]|E[1-2]|[FG])\\b", text)
     if ber_match:
         metrics["ber"] = ber_match.group(1)
     return metrics
@@ -76,13 +75,13 @@ def parse_dublin_url(url):
     if not url:
         return None
     clean_url = url.lower().replace("-", " ").replace("_", " ")
-    postcode_match = re.search(r"dublin\s+(\d+[a-z]?)", clean_url)
+    postcode_match = re.search(r"dublin\\s+(\\d+[a-z]?)", clean_url)
     postcode = postcode_match.group(0).upper().strip() if postcode_match else "DUBLIN COUNTY"
     
     street_parts = []
     tokens = clean_url.split("/")
     target_token = tokens[-1] if tokens[-1] else (tokens[-2] if len(tokens) > 1 else "")
-    target_token = re.sub(r"\d{5,}", "", target_token)
+    target_token = re.sub(r"\\d{5,}", "", target_token)
     target_token = target_token.replace("for sale", "").replace("co dublin", "").strip()
     
     words = target_token.split()
@@ -107,7 +106,7 @@ def clean_pdf_text(text):
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
-    text = re.sub(r"\|[-:| ]+\|", "", text)
+    text = re.sub(r"\\|[-:| ]+\\|", "", text)
     text = text.replace("|", "  ")
     return text.encode("latin-1", errors="ignore").decode("latin-1")
 
@@ -146,23 +145,100 @@ def generate_pdf_bytes(report_text, address):
 def mock_llm_parse_custom_works(narrative):
     estimates = []
     text = narrative.lower()
-    if any(k in text for k in ["wall", "knock", "rsj", "steel", "open plan"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["rsj"]["label"],
-            "low": DUBLIN_COST_DATABASE["rsj"]["low"],
-            "high": DUBLIN_COST_DATABASE["rsj"]["high"],
-            "scope": "Requires structural engineer certificate, steel beam, and local padstone casting."
-        })
-    if any(k in text for k in ["heat pump", "pump", "retrofit", "ber", "radiator"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["heat_pump"]["label"],
-            "low": DUBLIN_COST_DATABASE["heat_pump"]["low"],
-            "high": DUBLIN_COST_DATABASE["heat_pump"]["high"],
-            "scope": "Includes SEAI grant application preparation. Low-temp radiator resizing required."
-        })
-    if any(k in text for k in ["attic", "roof", "dormer", "loft"]):
-        estimates.append({
-            "item": DUBLIN_COST_DATABASE["attic"]["label"],
-            "low": DUBLIN_COST_DATABASE["attic"]["low"],
-            "high": DUBLIN_COST_DATABASE["attic"]["high"],
-            "scope": "Requires flo
+    
+    checks = {
+        "rsj": (["wall", "knock", "rsj", "steel", "open plan"], "Requires structural engineer certificate."),
+        "heat_pump": (["heat pump", "pump", "retrofit", "ber", "radiator"], "Includes SEAI grant preparation."),
+        "attic": (["attic", "roof", "dormer", "loft"], "Requires floor joist reinforcement."),
+        "rewire": (["wire", "rewire", "electrics"], "Full chasing of masonry walls."),
+        "insulation": (["wrap", "insulate", "external", "ewi"], "Requires sill depth extensions.")
+    }
+    
+    for key, (keywords, scope) in checks.items():
+        if any(k in text for k in keywords):
+            estimates.append({
+                "item": DUBLIN_COST_DATABASE[key]["label"],
+                "low": DUBLIN_COST_DATABASE[key]["low"],
+                "high": DUBLIN_COST_DATABASE[key]["high"],
+                "scope": scope
+            })
+    return estimates
+
+# ---------------------------------------------------------
+# STREAMLIT TWO-COLUMN UI LAYOUT
+# ---------------------------------------------------------
+left_panel, right_panel = st.columns(2)
+
+with left_panel:
+    st.subheader("1. Ingest Property Coordinates")
+    property_url = st.text_input(
+        "Daft.ie / MyHome.ie Listing URL", 
+        value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-dublin-8/6655188"
+    )
+    
+    extracted_street = "Target Property"
+    extracted_postcode = "DUBLIN COUNTY"
+    
+    if property_url:
+        parsed_url = parse_dublin_url(property_url)
+        extracted_street = parsed_url["street"]
+        extracted_postcode = parsed_url["postcode"]
+        st.success("Listing Ingested: " + parsed_url["address"])
+
+    # Establish geography and lat/lon bounds
+    is_d08 = "D08" in extracted_postcode or "D8" in extracted_postcode
+    is_d14 = "D14" in extracted_postcode or "DUNDRUM" in extracted_street.upper()
+    map_lat, map_lon = (53.2950, -6.2450) if is_d14 else (53.3402, -6.3156)
+
+    st.subheader("2. BER Document Ingestion (Combined Slot)")
+    ber_pdfs = st.file_uploader("Upload SEAI Technical Files (PDFs)", type=["pdf"], accept_multiple_files=True, key="multi_ber")
+    
+    ber_texts = []
+    pdf_metrics = {"size": None, "ber": None}
+    
+    if ber_pdfs:
+        for idx, pdf in enumerate(ber_pdfs):
+            text = extract_text_from_pdf(pdf.read())
+            ber_texts.append(text)
+            st.info(f"File {idx+1} ({pdf.name}) parsed successfully.")
+            extracted = extract_metrics_from_ber_text(text)
+            if extracted["size"]:
+                pdf_metrics["size"] = extracted["size"]
+            if extracted["ber"]:
+                pdf_metrics["ber"] = extracted["ber"]
+
+    st.subheader("3. Asset Media & Spatial Uploads")
+    media_tab1, media_tab2 = st.tabs(["📁 File Uploader", "📋 Clipboard Paste Area"])
+    
+    uploaded_media = []
+    with media_tab1:
+        uploaded_media = st.file_uploader(
+            "Upload Photos / Plans", 
+            type=["png", "jpg", "jpeg"], 
+            accept_multiple_files=True
+        )
+            
+    with media_tab2:
+        pasted_data = st.text_input("Clipboard Buffer", placeholder="Ctrl+V or drop an image into this window...")
+
+    st.subheader("🔧 Planned Alterations & Custom Works")
+    user_narrative = st.text_input("Custom Work Description", value="Knock down main wall to install RSJ beam, rewire, and install a heat pump")
+
+    st.subheader("🛌 Bedroom Dimensions Audit")
+    b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
+    b1_l = st.number_input("Bedroom 1 Length (m)", value=4.0, step=0.1)
+    b2_w = st.number_input("Bedroom 2 Width (m)", value=3.0, step=0.1)
+    b2_l = st.number_input("Bedroom 2 Length (m)", value=3.0, step=0.1)
+    b3_w = st.number_input("Bedroom 3 Width (m)", value=2.2, step=0.1)
+    b3_l = st.number_input("Bedroom 3 Length (m)", value=2.7, step=0.1)
+
+    st.subheader("🚽 SCSI Spatial Metrics")
+    guest_wc = st.checkbox("Downstairs Guest WC Present?", value=False)
+    building_era = st.selectbox("Construction Era", ["Pre-1940 (Period)", "1940s-1960s", "1970s-1980s", "1990s-2006", "2014+"], index=1)
+
+    st.subheader("💰 Buyer Parameters")
+    budget_max = st.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
+    target_ber = st.selectbox("Target Mortgage Tier", ["AIB Green Mortgage", "Standard Mortgage", "Net-Zero"])
+
+    st.subheader("⚙️ Calibration")
+  
