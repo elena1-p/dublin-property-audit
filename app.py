@@ -39,7 +39,6 @@ total_low = 0
 total_high = 0
 custom_works = []
 
-# FIX: Hoisted geographic variables to prevent NameErrors on page load
 map_lat, map_lon = 53.3402, -6.3156  # Default Dublin Coordinates (D08 Inchicore)
 is_d08 = True
 is_d14 = False
@@ -124,7 +123,6 @@ def clean_pdf_text(text):
     for k, v in replacements.items():
         text = text.replace(k, v)
         
-    # Strip table dividing line segments to prevent FPDF narrow multi_cell wrap crash
     text = re.sub(r"\|[-:| ]+\|", "", text)
     text = text.replace("|", "  ")
     
@@ -223,133 +221,4 @@ with left_panel:
         "Upload SEAI Technical Files (PDFs)", 
         type=["pdf"], 
         accept_multiple_files=True,
-        key="multi_ber"
-    )
-    
-    ber_texts = []
-    pdf_metrics = {"size": None, "ber": None}
-    
-    if ber_pdfs:
-        for idx, pdf in enumerate(ber_pdfs):
-            text = extract_text_from_pdf(pdf.read())
-            ber_texts.append(text)
-            st.info(f"File {idx+1} ({pdf.name}) parsed successfully.")
-            extracted = extract_metrics_from_ber_text(text)
-            if extracted["size"]:
-                pdf_metrics["size"] = extracted["size"]
-            if extracted["ber"]:
-                pdf_metrics["ber"] = extracted["ber"]
-
-    st.subheader("3. Asset Media & Spatial Uploads")
-    media_tab1, media_tab2 = st.tabs(["📁 File Uploader", "📋 Clipboard Paste Area"])
-    
-    uploaded_media = []
-    with media_tab1:
-        uploaded_media = st.file_uploader(
-            "Upload Photos / Plans", 
-            type=["png", "jpg", "jpeg"], 
-            accept_multiple_files=True
-        )
-            
-    with media_tab2:
-        pasted_data = st.text_input("Clipboard Buffer", placeholder="Ctrl+V or drop an image into this window...")
-
-    st.subheader("🔧 Custom Works")
-    user_narrative = st.text_input("Custom Work Description", value="Knock down main wall and install RSJ beam and a heat pump")
-
-    st.subheader("🛌 Bedroom Dimensions Audit")
-    b1_w = st.number_input("Bedroom 1 Width (m)", value=3.0, step=0.1)
-    b1_l = st.number_input("Bedroom 1 Length (m)", value=4.0, step=0.1)
-    
-    b2_w = st.number_input("Bedroom 2 Width (m)", value=3.0, step=0.1)
-    b2_l = st.number_input("Bedroom 2 Length (m)", value=3.0, step=0.1)
-    
-    b3_w = st.number_input("Bedroom 3 Width (m)", value=2.2, step=0.1)
-    b3_l = st.number_input("Bedroom 3 Length (m)", value=2.7, step=0.1)
-
-    st.subheader("💰 Buyer Parameters")
-    budget_max = st.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
-    target_ber = st.selectbox("Target Mortgage Tier", ["AIB Green Mortgage (B3 or better)", "Standard Mortgage (Any BER)", "Net-Zero A-Rating Target"])
-
-    st.subheader("⚙️ Calibration (Interactive Overrides)")
-    address_input = st.text_input("Property Address Override", value=f"{extracted_street}, {extracted_postcode}")
-    asking_price = st.number_input("Asking Price (€)", value=525000, step=10000)
-    
-    default_size = pdf_metrics["size"] if pdf_metrics["size"] else 95.0
-    size_sqm = st.number_input("Floorplate Size (m²)", value=default_size, step=1.0)
-    
-    default_ber = pdf_metrics["ber"] if pdf_metrics["ber"] else "B2"
-    ber_rating = st.selectbox("Current BER Rating", ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], index=4)
-    typology = st.selectbox("Property Typology", ["End-of-Terrace", "Mid-Terrace", "Semi-Detached", "Detached"])
-    
-    run_audit_btn = st.button("🚀 Run 360° Forensic Audit Protocol (v6.0)", type="primary", use_container_width=True)
-
-# Calculate bedroom areas dynamically
-b1_area = b1_w * b1_l
-b2_area = b2_w * b2_l
-b3_area = b3_w * b3_l
-
-# Process custom works based on narrative input
-if user_narrative:
-    custom_works = mock_llm_parse_custom_works(user_narrative)
-    if custom_works:
-        total_low = sum(item["low"] for item in custom_works)
-        total_high = sum(item["high"] for item in custom_works)
-
-# ---------------------------------------------------------
-# CALCULATE BID ROADS & ACQUISITION BOUNDARIES
-# ---------------------------------------------------------
-opening_bid = asking_price * 1.05
-fmv_ceiling = asking_price * 1.15
-walkaway_ceiling = fmv_ceiling - total_low
-
-b1_flag = "Habitable" if b1_area >= 7.0 else "UNLIVABLE BOX ROOM"
-b2_flag = "Habitable" if b2_area >= 7.0 else "UNLIVABLE BOX ROOM"
-b3_flag = "Habitable" if b3_area >= 7.0 else "UNLIVABLE BOX ROOM"
-
-# ---------------------------------------------------------
-# REPORT OUTPUT & SPATIAL ENGINE
-# ---------------------------------------------------------
-with right_panel:
-    st.subheader("📋 Forensic Audit & Strategic Acquisition Report")
-    
-    tab_report, tab_retrofit, tab_hazards, tab_verdict, tab_map = st.tabs([
-        "💶 Area Comps & CMA",
-        "🏗️ Retrofit & Spatial Fabric",
-        "⛈️ Hazards & Legal",
-        "🏁 Verdict & Export",
-        "🗺️ Spatial GIS Map"
-    ])
-
-    if run_audit_btn:
-        st.session_state.audit_report = f"""
-### 🏛️ 360° Forensic Audit: {address_input}
-*Generated: {datetime.date.today().strftime('%B %d, %Y')}*
-
----
-
-### EXECUTIVE SUMMARY:
-The property at **{address_input}** represents an excellent target matching your maximum budget of **€{budget_max:,}**. 
-Due to your required Capital Works Reserve requirements of **€{total_low:,} – €{total_high:,}**, your absolute walk-away bidding limit is calculated at **€{walkaway_ceiling:,.0f}** to preserve structural cash cushions.
-
----
-
-### SECTION 1: MICRO-MARKET CMA & VALUATIONS
-
-| BER Performance Tier | Average Price / m² | Target Property Alignment |
-|---|---|---|
-| **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | **Your target aligns here** |
-| **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
-| **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | |
-
-#### Extended Comparable Transaction Matrix
-| Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability |
-|---|---|---|---|---|---|---|---|---|
-| **{address_input}** | **{extracted_street}** | **Live** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** | **€{asking_price/size_sqm:,.0f}/m²** | **Target Property** |
-| Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | {typology} | €6,927/m² | Near target baseline |
-| Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | {typology} | €5,948/m² | Unmodernised comp |
-
-#### Valuation & Acquisition Boundaries
-* **Fair Market Value (FMV):** €{fmv_ceiling:,.0f}
-* **Recommended Opening Bid:** €{opening_bid:,.0f} (Asking + 5%)
-* 
+      
