@@ -24,12 +24,19 @@ if api_key:
 else:
     has_model = False
 
-# Multi-Model Auto-Failover Content Generator
+# Multi-Model Auto-Failover Content Generator with Detailed Diagnostics
 def generate_ai_content(prompt, contents=None):
     if not api_key:
-        raise Exception("API Key not configured.")
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-1.5-pro-latest"]
-    last_err = None
+        raise Exception("GEMINI_API_KEY is missing from your Streamlit Secrets. Please add it to your Streamlit App settings.")
+        
+    models_to_try = [
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-pro", 
+        "gemini-1.5-pro-latest"
+    ]
+    
+    errors = []
     for model_name in models_to_try:
         try:
             model = genai.GenerativeModel(model_name)
@@ -42,9 +49,15 @@ def generate_ai_content(prompt, contents=None):
                 response = model.generate_content(prompt)
             return response.text
         except Exception as e:
-            last_err = e
+            err_msg = str(e)
+            errors.append(f"🔴 **{model_name} failed:** {err_msg}")
+            # Fail early if there is an authorization, API key, or quota issue
+            if "API_KEY_INVALID" in err_msg or "API key not valid" in err_msg or "403" in err_msg or "quota" in err_msg.lower():
+                raise Exception(f"API Key / Authentication Issue: {err_msg}")
             continue
-    raise last_err
+            
+    # Raise a clear, comprehensive message displaying exactly why all models failed
+    raise Exception("All models failed to respond. Details:\n\n" + "\n\n".join(errors))
 
 # PDF Text-cleaning helper to prevent Latin-1 encoding crashes in FPDF
 def clean_pdf_text(text):
