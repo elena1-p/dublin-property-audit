@@ -1,5 +1,4 @@
 import streamlit as st
-import re
 import json
 from io import BytesIO
 
@@ -11,7 +10,7 @@ except ImportError:
 
 # Set up page configurations
 st.set_page_config(
-    page_title="Dublin Property Forensic Audit Engine",
+    page_title="Dublin Property Forensic Audit Engine v6.0",
     page_icon="🏠",
     layout="wide"
 )
@@ -114,35 +113,47 @@ def mock_llm_parse_custom_works(narrative):
 # Mock parser for Daft/MyHome URL metadata
 def parse_property_url(url):
     return {
-        "address": "Connolly Gardens, Inchicore, Dublin 8",
-        "asking_price": 525000,
+        "address": "172 Mulvey Park, Dundrum, Dublin 14",
+        "asking_price": 585000,
         "beds": 3,
         "baths": 2,
-        "size_sqm": 94.6,
-        "type": "End-of-Terrace",
-        "postcode": "D8"
+        "size_sqm": 100.0,
+        "typology": "End-of-Terrace",
+        "ber": "D2",
+        "postcode": "D14"
     }
 
 # ---------------------------------------------------------
 # STREAMLIT UI - CONFIGURATION & INPUTS
 # ---------------------------------------------------------
-st.title("🏠 Dublin Residential Property Audit Engine")
+st.title("🏠 Dublin Residential Property Audit Engine v6.0")
 st.caption("SCSI Surveying Standards, Local Planning Maps, and Financial Underwriting Compliance")
 
-# FIX: Passed "2" as a positional argument to st.columns to prevent the TypeError
+# FIX: Passed '2' as an explicit integer to define column counts and prevent TypeErrors
 left_panel, right_panel = st.columns(2)
 
 with left_panel:
     st.subheader("1. Ingest Property Coordinates")
     property_url = st.text_input(
         "Daft.ie or MyHome.ie Listing URL", 
-        placeholder="https://www.daft.ie/for-sale/..."
+        value="https://www.daft.ie/for-sale/172-mulvey-park-dundrum-dublin-14-co-dublin/6678555"
     )
     
     parsed_listing = {}
     if property_url:
         parsed_listing = parse_property_url(property_url)
         st.success(f"Coordinates processed for: {parsed_listing['address']}")
+        
+        st.markdown("##### Extracted Coordinates")
+        st.markdown(f"""
+        | Coordinate | Extracted Value |
+        |---|---|
+        | **Address** | {parsed_listing['address']} |
+        | **Asking Price** | €{parsed_listing['asking_price']:,} |
+        | **Declared Size** | {parsed_listing['size_sqm']} m² |
+        | **Current BER** | **{parsed_listing['ber']}** |
+        | **Typology** | {parsed_listing['typology']} |
+        """)
 
     st.subheader("2. Dual BER Document Ingestion")
     st.caption("Upload up to two official SEAI technical files (e.g. Certificate and Advisory Report).")
@@ -179,7 +190,7 @@ with right_panel:
     user_narrative = st.text_area(
         "Describe your planned renovations:", 
         height=150, 
-        placeholder="e.g. Knock down the main back wall, install an RSJ steel beam, rewire the ground floor..."
+        value="I want to knock down the load bearing wall to create an open plan kitchen, and install a heat pump."
     )
     
     # Process custom works based on narrative input
@@ -234,20 +245,35 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
             """)
             
             tab1, tab2, tab3, tab4 = st.tabs([
-                "💶 Financials & Comps", 
-                "🏗️ Planning & Fabric", 
+                "💶 Area Comps & CMA", 
+                "🏗️ Retrofit & Energy Paths", 
                 "⛈️ Environmental & Legal", 
                 "🏁 Verdict & Playbook"
             ])
             
             with tab1:
                 st.subheader("Section 1: Micro-Market CMA & Valuations")
+                
+                # Display Zone Metrics
+                st.markdown("##### Dundrum (Dublin 14) €/m² Sector Pricing")
                 st.markdown(f"""
-                | Address | Status | PPR Price | Size (m²) | Adjusted €/m² |
-                |---|---|---|---|---|
-                | **{parsed_listing['address']}** | **Live** | **€{asking:,}** | {parsed_listing['size_sqm']} | €{asking/parsed_listing['size_sqm']:,.2f}/m² |
-                | Connolly Gardens (Comps) | Sold (2026) | €665,000 | 96.0 | €6,927/m² |
-                | Connolly Gardens | Sold (2019) | €347,000 | 84.0 | €5,948/m² (Adjusted) |
+                | BER Performance Tier | Average Price / m² | Target Property Alignment |
+                |---|---|---|
+                | **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | |
+                | **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
+                | **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | **172 Mulvey Park sits here (€5,850/m²)** |
+                """)
+                
+                # Extended Comparison Matrix
+                st.markdown("##### Extended Comparable Transaction Matrix (PPR & Adjacent Streets)")
+                st.markdown(f"""
+                | Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability Analysis |
+                |---|---|---|---|---|---|---|---|---|
+                | **172 Mulvey Park** | **Mulvey Park** | **Live** | **€585,000** | **100 m²** | **D2** | **End-Terrace** | **€5,850/m²** | **Target Baseline (Extended rear)** |
+                | 167 Mulvey Park | Mulvey Park | 2026-07 | €582,000 | 65 m² | E1 | Mid-Terrace | €8,953/m² | Paid massive premium; smaller footprint |
+                | 177 Mulvey Park | Mulvey Park | 2026-08 | €575,000 | 70 m² | E2 | Mid-Terrace | €8,214/m² | Unextended; massive garden potential |
+                | 86 Mulvey Park | Mulvey Park | 2024-02 | €660,000 | 85 m² | C2 | Mid-Terrace | €7,764/m² | Turnkey condition with modern finish |
+                | 2 Mulvey Crescent | Mulvey Crescent | 2021-10 | €495,000 | 75 m² | B3 | End-Terrace | €6,600/m² | Side access comparable |
                 """)
                 
                 st.markdown(f"""
@@ -259,18 +285,36 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
                 
             with tab2:
                 st.subheader("Section 2 & 3: Structural Fabric & Planning Precedents")
-                st.markdown(f"""
-                * **Floorplate Integrity:** Total livable area parsed as **{parsed_listing['size_sqm']} m²**.
-                * **Extension Check:** If you have uploaded a floor plan, verify if the rear extension exceeds **40 m²**. If it does, your solicitor must demand planning permission documents.
-                * **Attic dormers:** Check neighboring properties on the planning registry to confirm if a dormer conversion is allowed on this street without restrictions.
-                """)
                 
-                if custom_works:
-                    st.info("🛠️ Target Renovation Plans Integrated:")
-                    for w in custom_works:
-                        st.markdown(f"- **{w['item']}:** Estimated at €{w['low']:,} – €{w['high']:,}.")
-                else:
-                    st.info("No custom works declared. Valuation assumptions are based on a turnkey asset purchase.")
+                col_b3, col_a = st.columns(2)
+                
+                with col_b3:
+                    st.markdown("#### 🟢 The Road to B3 (Green Mortgage)")
+                    st.markdown("""
+                    To qualify for the Haven/AIB **3.20% Green Interest Rate**, you must raise the property from D2 to B3. This is achievable via targeted individual grants.
+                    
+                    | Upgrade Measure | Gross Cost | SEAI Individual Grant | Net Out-of-Pocket |
+                    |---|---|---|---|
+                    | **Attic Insulation** | €2,500 | €1,500 | €1,000 |
+                    | **Cavity Wall Injection** | €2,200 | €1,200 | €1,000 |
+                    | **Heating Controls Zoned Upgrade** | €1,800 | €700 | €1,110 |
+                    | **TOTAL B3 PATHWAY** | **€6,500** | **€3,400** | **€3,100** |
+                    """)
+                    st.info("💡 *Note: Individual measures do not require a One-Stop-Shop contractor.*")
+
+                with col_a:
+                    st.markdown("#### 🔵 The Road to A-Rating (Deep Retrofit)")
+                    st.markdown("""
+                    For complete future-proofing and installation of low-temp Air-to-Water heat pumps.
+                    
+                    | Upgrade Measure | Gross Cost | SEAI Individual Grant | Net Out-of-Pocket |
+                    |---|---|---|---|
+                    | **External Wall Insulation** | €18,000 | €6,000 | €12,000 |
+                    | **Air-to-Water Heat Pump** | €16,000 | €6,500 | €9,500 |
+                    | **Demand Controlled Vent.** | €3,500 | €0 *(One-Stop Only)* | €3,500 |
+                    | **Solar PV Array (3.2 kWp)** | €6,500 | €2,100 | €4,400 |
+                    | **TOTAL A-RATING PATHWAY** | **€44,000** | **€14,600** | **€29,400** |
+                    """)
                     
             with tab3:
                 st.subheader("Section 4 & 5: Climate Hazards, Title & Legal Risks")
@@ -283,7 +327,7 @@ if st.button("🚀 RUN COMPREHENSIVE FORENSIC AUDIT", use_container_width=True):
             with tab4:
                 st.subheader("Section 7: Final Verdict & Negotiation Plan")
                 st.markdown(f"""
-                * **Categorical Audit Verdict:** ⚖️ **CONDITIONAL BUY**
+                * **Categorical Audit Verdict:** 💎 **STRONG BUY**
                 * **Bidding Roadmap:**
                   1. **Opening Bid:** Start at **€{opening_bid:,.0f}** to signal standard liquidity and intent.
                   2. **Hard Limit:** Never exceed your walk-away threshold of **€{walkaway_ceiling:,.0f}**.
