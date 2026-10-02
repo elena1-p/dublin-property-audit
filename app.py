@@ -129,7 +129,8 @@ def parse_property_url(url):
 st.title("🏠 Dublin Residential Property Audit Engine")
 st.caption("SCSI Surveying Standards, Local Planning Maps, and Financial Underwriting Compliance")
 
-left_panel, right_panel = st.columns()
+# FIX: Passed "2" as a positional argument to st.columns to prevent the TypeError
+left_panel, right_panel = st.columns(2)
 
 with left_panel:
     st.subheader("1. Ingest Property Coordinates")
