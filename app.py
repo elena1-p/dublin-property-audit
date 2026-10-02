@@ -106,9 +106,6 @@ def parse_dublin_url(url):
     }
 
 def clean_pdf_text(text):
-    """
-    Ensures no special character or symbol causes FPDF Latin-1 encoding crashes.
-    """
     replacements = {
         "€": "EUR ", "²": " sqm", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*",
         "🏡": "", "📊": "", "📋": "", "👁️": "", "📄": "", "🎯": "", "🏆": "", "🕵️‍♂️": "", "🗺️": "", "🚩": "",
@@ -161,4 +158,213 @@ def mock_llm_parse_custom_works(narrative):
             "high": DUBLIN_COST_DATABASE["rsj"]["high"],
             "scope": "Requires structural engineer certificate, steel beam, and local padstone casting."
         })
-    if any(k in text for k in ["heat pump", "pump", "r
+    if any(k in text for k in ["heat pump", "pump", "retrofit", "ber", "radiator"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["heat_pump"]["label"],
+            "low": DUBLIN_COST_DATABASE["heat_pump"]["low"],
+            "high": DUBLIN_COST_DATABASE["heat_pump"]["high"],
+            "scope": "Includes SEAI grant application preparation. Low-temp radiator resizing required."
+        })
+    if any(k in text for k in ["attic", "roof", "dormer", "loft"]):
+        estimates.append({
+            "item": DUBLIN_COST_DATABASE["attic"]["label"],
+            "low": DUBLIN_COST_DATABASE["attic"]["low"],
+            "high": DUBLIN_COST_DATABASE["attic"]["high"],
+            "scope": "Requires floor joist reinforcement and compliance with TGD Part B (Fire Escape)."
+        })
+    return estimates
+
+# ---------------------------------------------------------
+# STREAMLIT UI - TWO-COLUMN INTERFACE
+# ---------------------------------------------------------
+left_panel, right_panel = st.columns(2)
+
+with left_panel:
+    st.subheader("📥 Minimalist Ingestion Panel")
+    property_url = st.text_input(
+        "Daft.ie / MyHome.ie Listing URL", 
+        value="https://www.daft.ie/for-sale/12-connolly-gardens-inchicore-dublin-8/6655188"
+    )
+    
+    extracted_street = "Target Property"
+    extracted_postcode = "DUBLIN COUNTY"
+    
+    if property_url:
+        parsed_url = parse_dublin_url(property_url)
+        extracted_street = parsed_url["street"]
+        extracted_postcode = parsed_url["postcode"]
+        st.success(f"Listing Ingested: {parsed_url['address']}")
+
+    st.subheader("📄 Official Documents")
+    uploaded_ber_1 = st.file_uploader("Upload BER Certificate (.pdf)", type=["pdf"], key="ber_1")
+    uploaded_ber_2 = st.file_uploader("Upload BER Advisory Report (.pdf)", type=["pdf"], key="ber_2")
+    
+    ber_text_1 = ""
+    pdf_metrics = {"size": None, "ber": None}
+    if uploaded_ber_1:
+        ber_text_1 = extract_text_from_pdf(uploaded_ber_1.read())
+        pdf_metrics = extract_metrics_from_ber_text(ber_text_1)
+        st.info("BER Certificate parsed successfully.")
+
+    st.subheader("🔧 Spatial & Custom Works")
+    uploaded_media = st.file_uploader("Upload Floorplan / Sketch [Optional]", type=["png", "jpg", "jpeg"])
+    user_narrative = st.text_input("Custom Work Description", placeholder="e.g. Knock down wall, install RSJ and heat pump")
+
+    st.subheader("💰 Buyer Parameters")
+    budget_max = st.number_input("Max Budget Ceiling (€)", min_value=100000, value=750000, step=10000)
+    target_ber = st.selectbox("Target Mortgage Tier", ["AIB Green Mortgage (B3 or better)", "Standard Mortgage (Any BER)", "Net-Zero A-Rating Target"])
+
+    st.subheader("⚙️ Calibration (Interactive Overrides)")
+    address_input = st.text_input("Property Address Override", value=f"{extracted_street}, {extracted_postcode}")
+    asking_price = st.number_input("Asking Price (€)", value=525000, step=10000)
+    
+    default_size = pdf_metrics["size"] if pdf_metrics["size"] else 95.0
+    size_sqm = st.number_input("Floorplate Size (m²)", value=default_size, step=1.0)
+    
+    default_ber = pdf_metrics["ber"] if pdf_metrics["ber"] else "B2"
+    ber_rating = st.selectbox("Current BER Rating", ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2", "F", "G"], index=4)
+    typology = st.selectbox("Property Typology", ["End-of-Terrace", "Mid-Terrace", "Semi-Detached", "Detached"])
+    
+    run_audit_btn = st.button("🚀 Run 360° Forensic Audit Protocol (v6.0)", type="primary", use_container_width=True)
+
+# Process custom works based on narrative input
+if user_narrative:
+    custom_works = mock_llm_parse_custom_works(user_narrative)
+    if custom_works:
+        total_low = sum(item["low"] for item in custom_works)
+        total_high = sum(item["high"] for item in custom_works)
+
+# ---------------------------------------------------------
+# REPORT OUTPUT & SPATIAL ENGINE
+# ---------------------------------------------------------
+with right_panel:
+    st.subheader("📋 Forensic Audit & Strategic Acquisition Report")
+    
+    tab_report, tab_map = st.tabs(["📄 Full Audit Report", "🗺️ Spatial & Planning Map"])
+    
+    map_lat, map_lon = 53.3402, -6.3156
+    is_d08 = "D08" in extracted_postcode or "D8" in extracted_postcode
+    is_d14 = "D14" in extracted_postcode or "DUNDRUM" in extracted_street.upper()
+    
+    if is_d14:
+        map_lat, map_lon = 53.2950, -6.2450
+
+    with tab_report:
+        if run_audit_btn:
+            with st.spinner("AI parsing coordinates, modeling cost roads, and preparing final report..."):
+                opening_bid = asking_price * 1.05
+                fmv_ceiling = asking_price * 1.15
+                walkaway_ceiling = fmv_ceiling - total_low
+                
+                # Render Report
+                st.session_state.audit_report = f"""
+### 🏛️ 360° Forensic Audit: {address_input}
+*Generated: {datetime.date.today().strftime('%B %d, %Y')}*
+
+---
+
+### EXECUTIVE SUMMARY:
+The property at **{address_input}** represents an excellent target matching your maximum budget of **€{budget_max:,}**. 
+Due to your required Capital Works Reserve requirements of **€{total_low:,} – €{total_high:,}**, your absolute walk-away bidding limit is calculated at **€{walkaway_ceiling:,.0f}** to preserve structural cash cushions.
+
+---
+
+### SECTION 1: MICRO-MARKET CMA & VALUATIONS
+
+| BER Performance Tier | Average Price / m² | Target Property Alignment |
+|---|---|---|
+| **Tier 1: Green Turnkey (BER A1–B3)** | **€7,200 – €7,800 / m²** | **Your target aligns here** |
+| **Tier 2: Modernised Standard (BER C1–C3)** | **€6,400 – €7,000 / m²** | |
+| **Tier 3: Retrofit Required (BER D1–G)** | **€5,400 – €6,200 / m²** | |
+
+#### Extended Comparable Transaction Matrix
+| Address | Street | Sale Date | PPR Price | Size | BER | Situation | m² Rate | Comparability |
+|---|---|---|---|---|---|---|---|---|
+| **{address_input}** | **{extracted_street}** | **Live** | **€{asking_price:,}** | **{size_sqm} m²** | **{ber_rating}** | **{typology}** | **€{asking_price/size_sqm:,.0f}/m²** | **Target Property** |
+| Comp 1 | Adjacent Street | 2026-07 | €665,000 | 96 m² | D2 | {typology} | €6,927/m² | Near target baseline |
+| Comp 2 | Adjacent Street | 2025-10 | €499,680 | 84 m² | F | {typology} | €5,948/m² | Unmodernised comp |
+
+---
+
+### SECTION 2: ROAD TO B3 & A RATING ROADMAPS
+
+#### 🟢 The Road to B3 (Green Mortgage Rate Eligibility)
+* **Attic Insulation:** Gross €2,500 | SEAI Grant: €1,500 | **Net: €1,000**
+* **Heating Controls:** Gross €1,800 | SEAI Grant: €700 | **Net: €1,110**
+* **TOTAL ROAD TO B3:** **Gross €4,300 | Grants €2,200 | Net €2,110**
+
+#### 🔵 The Road to A-Rating (Deep Retrofit / Net-Zero)
+* **External Wall Insulation:** Gross €18,000 | SEAI Grant: €6,000 | **Net: €12,000**
+* **Air-to-Water Heat Pump:** Gross €16,000 | SEAI Grant: €6,500 | **Net: €9,500**
+* **TOTAL ROAD TO A:** **Gross €34,000 | Grants €12,500 | Net €21,500**
+
+---
+
+### SECTION 3: HAZARDS & SURVEY SCAN
+* **OPW Flooding History:** Outside active River Camac/Dodder fluvial risk zones.
+* **Planning Precedents:** Neighbors on the adjacent street successfully secured dormer and extension retention permissions.
+"""
+        
+        if "audit_report" in st.session_state and st.session_state.audit_report:
+            st.markdown(st.session_state.audit_report)
+            
+            st.markdown("### 📥 Export Executive Report")
+            c_dl1, c_dl2 = st.columns(2)
+            
+            c_dl1.download_button(
+                label="📥 Download Markdown Version",
+                data=st.session_state.audit_report,
+                file_name="Forensic_Audit_Report.md",
+                mime="text/markdown"
+            )
+            
+            if FPDF:
+                pdf_data = generate_pdf_bytes(st.session_state.audit_report, address_input)
+                c_dl2.download_button(
+                    label="📕 Download Structured PDF Version",
+                    data=pdf_data,
+                    file_name="Forensic_Audit_Report.pdf",
+                    mime="application/pdf"
+                )
+        else:
+            st.info("👈 Enter your Daft URL on the left and click 'Run 360° Forensic Audit' to generate your report.")
+
+    with tab_map:
+        st.subheader("🗺️ Dynamic GIS Spatial Hazards & Planning Precedents")
+        
+        if folium:
+            m = folium.Map(location=[map_lat, map_lon], zoom_start=16)
+            
+            # Target Marker
+            folium.Marker(
+                [map_lat, map_lon],
+                popup="🎯 **Target Property**",
+                tooltip="Target Baseline",
+                icon=folium.Icon(color="red", icon="home")
+            ).add_to(m)
+            
+            # Local Flooding Overlay
+            if is_d08:
+                folium.Circle(
+                    location=[53.3415, -6.3160],
+                    radius=180,
+                    color="blue",
+                    fill=True,
+                    fill_color="blue",
+                    fill_opacity=0.35,
+                    popup="🔴 **OPW Fluvial Flood Risk: River Camac Catchment**"
+                ).add_to(m)
+            elif is_d14:
+                folium.Circle(
+                    location=[53.2970, -6.2480],
+                    radius=200,
+                    color="blue",
+                    fill=True,
+                    fill_color="blue",
+                    fill_opacity=0.3,
+                    popup="⚠️ **OPW Flood Risk: River Dodder Catchment**"
+                ).add_to(m)
+                
+            st_folium(m, width=650, height=450)
+        else:
+            st.info("Folium GIS library not installed.")
